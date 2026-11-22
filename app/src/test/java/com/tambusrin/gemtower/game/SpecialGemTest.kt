@@ -1,6 +1,7 @@
 package com.tambusrin.gemtower.game
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import kotlin.random.Random
@@ -9,18 +10,33 @@ class SpecialGemTest {
 
     @Test
     fun everySpecialHasExactlyOneValidRecipe() {
-        assertEquals(13, GemDB.recipes.size)
+        assertEquals(17, GemDB.recipes.size)
         for (k in SpecialKind.entries.filterNot { it.hidden }) {  // 히든 보석은 조합법 없음
             assertEquals("recipe count for $k", 1, GemDB.recipes.count { it.result == k })
         }
         // 재료 조합이 같은 조합법이 없어야 함
-        assertEquals(GemDB.recipes.size, GemDB.recipes.map { it.parts.toSet() }.toSet().size)
+        assertEquals(GemDB.recipes.size, GemDB.recipes.map { it.parts.toSet() to it.specialParts.toSet() }.toSet().size)
         for (r in GemDB.recipes) {
-            assertEquals(3, r.parts.size)
-            assertEquals("parts must be distinct types: $r", 3, r.parts.map { it.type }.toSet().size)
+            assertEquals(3, r.parts.size + r.specialParts.size)
+            assertEquals("parts must be distinct types: $r", r.parts.size, r.parts.map { it.type }.toSet().size)
+            assertEquals("special parts must be distinct: $r", r.specialParts.size, r.specialParts.toSet().size)
+            for (sp in r.specialParts) {
+                assertFalse("hidden gem can not be an ingredient", sp.hidden)
+                assertTrue("legendary must use lower-tier specials", GemDB.recipeFor(sp).tier < 3)
+            }
             assertTrue(GemDB.special(r.result).desc.isNotEmpty())
         }
-        assertEquals(listOf(8, 3, 2), (0..2).map { t -> GemDB.recipes.count { it.tier == t } })
+        assertEquals(listOf(9, 3, 2, 3), (0..3).map { t -> GemDB.recipes.count { it.tier == t } })
+    }
+
+    @Test
+    fun everyLowGradeGemIsUsedInSomeRecipe() {
+        // 깨진·흠있는·일반 보석은 6종 모두 어떤 조합법에든 재료로 쓰여야 함 (버려지는 보석이 없게)
+        for (q in listOf(GemQuality.CHIPPED, GemQuality.FLAWED, GemQuality.NORMAL)) {
+            for (t in GemType.entries) {
+                assertTrue("${q.label} ${t.label} is unused", GemDB.recipesUsing(GemKey(t, q)).isNotEmpty())
+            }
+        }
     }
 
     @Test
@@ -31,6 +47,7 @@ class SpecialGemTest {
         fun minDmg(tier: Int) = GemDB.recipes.filter { it.tier == tier }.minOf { power(it.result) }
         assertTrue(minDmg(1) > maxDmg(0))
         assertTrue(minDmg(2) > maxDmg(1))
+        assertTrue(minDmg(3) > maxDmg(2))
     }
 
     @Test

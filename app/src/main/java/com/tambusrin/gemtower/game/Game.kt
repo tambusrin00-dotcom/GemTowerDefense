@@ -497,7 +497,24 @@ class Game(private val rng: Random = Random.Default) {
             }
             used.add(found ?: return null)
         }
-        return if (tUsed) used else null
+        if (!tUsed) return null
+        // 전설 조합법: 필드의 특수 보석 재료 (같은 종류가 여럿이면 강화 단계가 가장 낮은 것을 씀)
+        for (sp in r.specialParts) {
+            var found: Tower? = null
+            for (x in 0 until W) for (y in 0 until H) {
+                val o = towers[x][y] ?: continue
+                if (o.special != sp || used.any { it === o }) continue
+                if (found == null || o.specialLevel < found.specialLevel) found = o
+            }
+            used.add(found ?: return null)
+        }
+        return used
+    }
+
+    /** 필드에 이 특수 보석이 있는지. 조합법 창 표시용. */
+    fun hasSpecialOnField(k: SpecialKind): Boolean {
+        for (x in 0 until W) for (y in 0 until H) if (towers[x][y]?.special == k) return true
+        return false
     }
 
     fun keep(t: Tower) = finishRound(t)

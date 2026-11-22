@@ -79,6 +79,21 @@ class ScreenshotActivity : Activity() {
                 view.debugSetSpeed(3)
                 g.debugStartWave()
             }
+            "legend" -> {
+                // 전설 조합(절대영도)이 가능한 장면: 서리 첨탑 + 수정 감옥이 필드에, 무결점 사파이어가 이번 라운드에
+                g.debugSetup(wave = 22, gold = 150, chanceLevel = 7, lives = 16)
+                buildMaze(g, 60, lateGems, rng)
+                bestCells(g, 2, rng).forEachIndexed { i, c ->
+                    g.debugKeptGem(c, SAPPHIRE, NORMAL, if (i == 0) SpecialKind.FROST_SPIRE else SpecialKind.CRYSTAL_PRISON, 2)
+                }
+                var s: Cell? = null
+                listOf(SAPPHIRE, RUBY, TOPAZ, EMERALD, DIAMOND).forEachIndexed { i, type ->
+                    val c = bestCells(g, 1, rng).first()
+                    g.placeGem(c, type, if (i == 0) FLAWLESS else FLAWED, hidden = false)
+                    if (i == 0) s = c
+                }
+                g.selected = s
+            }
             "hidden" -> {
                 // 히든 보석(우라늄)이 이번 라운드에 나온 장면
                 g.debugSetup(wave = 12, gold = 80, chanceLevel = 5, lives = 19)

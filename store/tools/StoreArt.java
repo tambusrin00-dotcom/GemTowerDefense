@@ -35,7 +35,7 @@ public class StoreArt {
     static final String[][] SHOTS = {
         {"maze", "보석으로 미로를 짓고, 적의 길을 늘려라"},
         {"choose", "5개 중 단 하나만 남긴다 · 합성과 특수 조합"},
-        {"recipes", "연쇄 번개, 기절, 처형… 13종 특수 보석"},
+        {"recipes", "연쇄 번개, 기절, 처형… 17종 특수 보석"},
         {"boss", "10웨이브마다 찾아오는 보스를 막아라"},
     };
 

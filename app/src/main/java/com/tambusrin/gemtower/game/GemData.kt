@@ -31,6 +31,7 @@ enum class SpecialKind(val label: String, val hidden: Boolean = false) {
     GOLDEN_IDOL("황금 우상"),
     CRYSTAL_PRISON("수정 감옥"),
     BLOOD_STONE("피의 결정"),
+    SPRAY_SPIRE("물보라 첨탑"),
     // 중급
     NEBULA_CANNON("성운 포대"),
     PLAGUE_LORD("역병 군주"),
@@ -38,6 +39,10 @@ enum class SpecialKind(val label: String, val hidden: Boolean = false) {
     // 상급
     STAR_HEART("별의 심장"),
     CHAOS_RIFT("혼돈의 균열"),
+    // 전설 (특수 보석 2개 + 무결점 보석)
+    ABSOLUTE_ZERO("절대영도"),
+    THUNDER_GOD("뇌신의 심판"),
+    GOLDEN_REAPER("황금 사신"),
     // 히든 (조합 불가, 보석을 놓을 때 0.000001% 확률)
     URANIUM("우라늄", hidden = true),
 }
@@ -76,14 +81,22 @@ data class GemKey(val type: GemType, val quality: GemQuality) {
     override fun toString() = "${quality.label} ${type.label}"
 }
 
-data class Recipe(val result: SpecialKind, val parts: List<GemKey>) {
-    /** 0 = 하급, 1 = 중급, 2 = 상급 (가장 높은 재료 등급 기준) */
+/**
+ * 조합법. parts = 일반 보석 재료, specialParts = 특수 보석 재료 (전설 조합법만 사용).
+ * 일반 보석 재료 중 하나는 반드시 이번 라운드 보석이어야 합성할 수 있음.
+ */
+data class Recipe(val result: SpecialKind, val parts: List<GemKey>, val specialParts: List<SpecialKind> = emptyList()) {
+    /** 0 = 하급, 1 = 중급, 2 = 상급 (가장 높은 재료 등급 기준), 3 = 전설 (특수 보석이 재료) */
     val tier: Int
-        get() = when (parts.maxOf { it.quality }) {
+        get() = if (specialParts.isNotEmpty()) 3 else when (parts.maxOf { it.quality }) {
             GemQuality.PERFECT -> 2
             GemQuality.FLAWLESS -> 1
             else -> 0
         }
+
+    /** 화면 표시용 재료 이름 (특수 보석 먼저) */
+    val partLabels: List<String>
+        get() = specialParts.map { it.label } + parts.map { it.toString() }
 }
 
 /** 보석 수치 / 확률표 / 조합법. 밸런스 조절은 여기서. */
@@ -110,7 +123,7 @@ object GemDB {
     /** 보석을 하나 놓을 때 히든 보석(우라늄)이 나올 확률: 0.000001% = 1e-8 */
     const val HIDDEN_CHANCE = 1e-8
 
-    val tierNames = listOf("하급", "중급", "상급")
+    val tierNames = listOf("하급", "중급", "상급", "전설")
 
     private fun k(t: GemType, q: GemQuality) = GemKey(t, q)
     private val C = GemQuality.CHIPPED
@@ -129,6 +142,7 @@ object GemDB {
         Recipe(SpecialKind.GOLDEN_IDOL, listOf(k(GemType.DIAMOND, N), k(GemType.TOPAZ, C), k(GemType.EMERALD, C))),
         Recipe(SpecialKind.CRYSTAL_PRISON, listOf(k(GemType.SAPPHIRE, N), k(GemType.AMETHYST, F), k(GemType.TOPAZ, F))),
         Recipe(SpecialKind.BLOOD_STONE, listOf(k(GemType.RUBY, N), k(GemType.EMERALD, F), k(GemType.AMETHYST, C))),
+        Recipe(SpecialKind.SPRAY_SPIRE, listOf(k(GemType.TOPAZ, N), k(GemType.DIAMOND, F), k(GemType.SAPPHIRE, C))),
         // ---- 중급: 무결점 + 일반 ----
         Recipe(SpecialKind.NEBULA_CANNON, listOf(k(GemType.AMETHYST, FL), k(GemType.DIAMOND, N), k(GemType.SAPPHIRE, N))),
         Recipe(SpecialKind.PLAGUE_LORD, listOf(k(GemType.EMERALD, FL), k(GemType.TOPAZ, N), k(GemType.RUBY, N))),
@@ -136,12 +150,19 @@ object GemDB {
         // ---- 상급: 완벽한 + 무결점 ----
         Recipe(SpecialKind.STAR_HEART, listOf(k(GemType.DIAMOND, P), k(GemType.RUBY, FL), k(GemType.SAPPHIRE, FL))),
         Recipe(SpecialKind.CHAOS_RIFT, listOf(k(GemType.AMETHYST, P), k(GemType.EMERALD, FL), k(GemType.TOPAZ, FL))),
+        // ---- 전설: 특수 보석 2개 + 무결점 (재료 특수 보석은 바위가 되고 강화 단계도 사라짐) ----
+        Recipe(SpecialKind.ABSOLUTE_ZERO, listOf(k(GemType.SAPPHIRE, FL)), listOf(SpecialKind.FROST_SPIRE, SpecialKind.CRYSTAL_PRISON)),
+        Recipe(SpecialKind.THUNDER_GOD, listOf(k(GemType.TOPAZ, FL)), listOf(SpecialKind.STORM_SPIRE, SpecialKind.THUNDER_HAMMER)),
+        Recipe(SpecialKind.GOLDEN_REAPER, listOf(k(GemType.DIAMOND, FL)), listOf(SpecialKind.GOLDEN_IDOL, SpecialKind.BLOOD_STONE)),
     )
 
     fun recipeFor(k: SpecialKind) = recipes.first { it.result == k }
 
     /** 이 보석이 재료로 들어가는 조합법 */
     fun recipesUsing(key: GemKey) = recipes.filter { key in it.parts }
+
+    /** 이 특수 보석이 재료로 들어가는 전설 조합법 */
+    fun recipesUsing(k: SpecialKind) = recipes.filter { k in it.specialParts }
 
     fun rollQuality(level: Int, rng: Random): GemQuality {
         val row = chanceTable[level.coerceIn(0, maxChanceLevel)]
@@ -201,6 +222,9 @@ object GemDB {
             SpecialKind.BLOOD_STONE -> GemStats(n, 0xFFC4163A.toInt(), 90f, range = 3.2f, cooldown = 0.9f,
                 splashRadius = 1.3f, splashPct = 0.5f, executePct = 0.15f,
                 desc = "빈사 상태의 적을 즉시 처치합니다.")
+            SpecialKind.SPRAY_SPIRE -> GemStats(n, 0xFF4FC3F7.toInt(), 50f, range = 3.6f, cooldown = 0.8f,
+                targets = 3, slowPct = 0.3f, slowDur = 2f,
+                desc = "여러 적에게 물보라를 뿌려 함께 둔화시킵니다.")
             SpecialKind.NEBULA_CANNON -> GemStats(n, 0xFF5A6BFF.toInt(), 380f, range = 6f, cooldown = 1.3f,
                 splashRadius = 1.8f, splashPct = 0.6f, airMult = 2.5f,
                 desc = "먼 거리를 광역 포격합니다. 공중 유닛에 강합니다.")
@@ -217,6 +241,15 @@ object GemDB {
             SpecialKind.CHAOS_RIFT -> GemStats(n, 0xFFE040FB.toInt(), 900f, range = 5.5f, cooldown = 0.7f,
                 chainCount = 6, chainRange = 3f, chainPct = 0.85f, poisonDps = 400f, poisonDur = 4f, airMult = 2f,
                 desc = "혼돈의 번개가 6번 튕기며 독을 퍼뜨립니다.")
+            SpecialKind.ABSOLUTE_ZERO -> GemStats(n, 0xFFD6F6FF.toInt(), 2600f, range = 5f, cooldown = 1f,
+                splashRadius = 2.2f, splashPct = 0.6f, slowPct = 0.7f, slowDur = 3f, stunChance = 0.3f, stunDur = 1.5f,
+                desc = "모든 것을 얼려 멈춥니다. 넓은 범위를 크게 둔화시키고 기절시킵니다.")
+            SpecialKind.THUNDER_GOD -> GemStats(n, 0xFFFFF59D.toInt(), 3000f, range = 5.5f, cooldown = 0.9f,
+                chainCount = 8, chainRange = 3f, chainPct = 0.9f, stunChance = 0.35f, stunDur = 1.2f, critChance = 0.3f, critMult = 2.5f,
+                desc = "하늘의 번개가 8번 튕기며 적을 기절시킵니다.")
+            SpecialKind.GOLDEN_REAPER -> GemStats(n, 0xFFFFD54F.toInt(), 2800f, range = 4.5f, cooldown = 0.8f,
+                targets = 2, critChance = 0.3f, critMult = 3f, executePct = 0.25f, bountyBonus = 5,
+                desc = "빈사의 적을 거두고, 처치한 적은 골드를 5 더 줍니다.")
             // 공격력은 Game.refreshHiddenGems()가 매 프레임 "필드의 다른 모든 보석 공격력 합"으로 채움
             SpecialKind.URANIUM -> GemStats(n, 0xFF9CFF3A.toInt(), 0f, range = 4.5f, cooldown = 1f,
                 desc = "히든 보석! 필드에 있는 다른 모든 보석의 공격력을 합친 만큼 피해를 줍니다.")
@@ -231,7 +264,7 @@ object GemDB {
         )
     }
 
-    fun recipeText(r: Recipe) = "${r.result.label} = " + r.parts.joinToString(" + ")
+    fun recipeText(r: Recipe) = "${r.result.label} = " + r.partLabels.joinToString(" + ")
 
     fun describe(s: GemStats): List<String> = buildList {
         add("공격력 %.0f · 사거리 %.1f · 간격 %.2f초".format(s.damage, s.range, s.cooldown))

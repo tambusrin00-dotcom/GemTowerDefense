@@ -679,22 +679,28 @@ class GameView(context: Context) : View(context) {
         y += drawWrapped(c, "재료 보석이 필드에 모두 있고 그중 하나가 이번 라운드 보석이면, 선택 단계에서 그 보석을 눌러 합성할 수 있습니다. 이미 남긴 재료 보석은 바위가 됩니다.", x, y, w, dp(12f), TEXT_DIM) + dp(4f)
         y += drawWrapped(c, "초록색 = 지금 필드에 있는 재료", x, y, w, dp(12f), OWNED, bold = true) + dp(10f)
 
-        for (tier in 0..2) {
+        for (tier in GemDB.tierNames.indices) {
             val list = GemDB.recipes.filter { it.tier == tier }
             if (list.isEmpty()) continue
-            val tierDesc = when (tier) { 0 -> "일반 보석이 핵심 재료"; 1 -> "무결점 보석이 핵심 재료"; else -> "완벽한 보석이 핵심 재료" }
+            val tierDesc = when (tier) {
+                0 -> "일반 보석이 핵심 재료"
+                1 -> "무결점 보석이 핵심 재료"
+                2 -> "완벽한 보석이 핵심 재료"
+                else -> "특수 보석 2개 + 무결점 보석 (재료 특수 보석의 강화는 사라짐)"
+            }
             y += drawWrapped(c, "━ ${GemDB.tierNames[tier]} · $tierDesc", x, y, w, dp(14f), Color.WHITE, bold = true) + dp(8f)
             for (r in list) {
                 val s = GemDB.special(r.result)
-                val owned = r.parts.map { game.hasGemOnField(it) }
+                // 재료 표시 순서는 partLabels와 같게 (특수 보석 먼저)
+                val owned = r.specialParts.map { game.hasSpecialOnField(it) } + r.parts.map { game.hasGemOnField(it) }
                 val ready = owned.all { it }
                 y += drawWrapped(c, "◆ ${r.result.label}" + if (ready) "  ✓ 재료 모두 있음" else "", x, y, w, dp(15f), s.color, bold = true) + dp(2f)
 
                 val sb = SpannableStringBuilder()
-                r.parts.forEachIndexed { i, p ->
+                r.partLabels.forEachIndexed { i, label ->
                     if (i > 0) sb.append(" + ")
                     val start = sb.length
-                    sb.append(p.toString())
+                    sb.append(label)
                     sb.setSpan(ForegroundColorSpan(if (owned[i]) OWNED else MISSING), start, sb.length, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
                 }
                 val key = r.result.name + owned.joinToString("") { if (it) "1" else "0" }
@@ -828,12 +834,11 @@ class GameView(context: Context) : View(context) {
 
         for (line in GemDB.describe(t.stats)) y += drawWrapped(c, line, x, y, w, dp(12f), TEXT_DIM)
         if (t.kept) y += drawWrapped(c, "처치 ${t.kills} · 누적 피해 ${t.totalDamage.toInt()}", x, y, w, dp(12f), 0xFFA8E6B0.toInt())
-        if (t.special == null) {
-            val uses = GemDB.recipesUsing(GemKey(t.type, t.quality))
-            if (uses.isNotEmpty()) {
-                y += dp(4f)
-                y += drawWrapped(c, "재료로 쓰임: " + uses.joinToString(", ") { it.result.label }, x, y, w, dp(12f), 0xFFD9B3FF.toInt())
-            }
+        val sp = t.special
+        val uses = if (sp == null) GemDB.recipesUsing(GemKey(t.type, t.quality)) else GemDB.recipesUsing(sp)
+        if (uses.isNotEmpty()) {
+            y += dp(4f)
+            y += drawWrapped(c, "재료로 쓰임: " + uses.joinToString(", ") { it.result.label }, x, y, w, dp(12f), 0xFFD9B3FF.toInt())
         }
         return y
     }
