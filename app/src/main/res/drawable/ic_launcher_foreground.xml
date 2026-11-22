@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 보석 아이콘. store/tools/StoreArt.java 의 512px 스토어 아이콘과 같은 도형 (108 기준 좌표) -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- 윗면(크라운) -->
+    <path android:fillColor="#C58BFF" android:pathData="M38,38 L46,50 L26,50 Z" />
+    <path android:fillColor="#E9D2FF" android:pathData="M38,38 L70,38 L62,50 L46,50 Z" />
+    <path android:fillColor="#A866F2" android:pathData="M70,38 L82,50 L62,50 Z" />
+    <!-- 아랫면(파빌리온) -->
+    <path android:fillColor="#9A4DEB" android:pathData="M26,50 L46,50 L54,80 Z" />
+    <path android:fillColor="#7B30D2" android:pathData="M46,50 L62,50 L54,80 Z" />
+    <path android:fillColor="#5A1EA8" android:pathData="M62,50 L82,50 L54,80 Z" />
+    <!-- 반짝임 -->
+    <path android:fillColor="#FFFFFF" android:pathData="M78,28 L79.6,32.4 L84,34 L79.6,35.6 L78,40 L76.4,35.6 L72,34 L76.4,32.4 Z" />
+</vector>

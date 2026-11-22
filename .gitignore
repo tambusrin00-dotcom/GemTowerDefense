@@ -1,0 +1,25 @@
+*.iml
+.gradle
+/local.properties
+/.idea/caches
+/.idea/libraries
+/.idea/modules.xml
+/.idea/workspace.xml
+/.idea/navEditor.xml
+/.idea/assetWizardSettings.xml
+.DS_Store
+/build
+/captures
+.externalNativeBuild
+.cxx
+local.properties
+.kotlin
+/app/release
+/app/debug
+
+# 서명 키 (절대 커밋 금지)
+*.jks
+*.keystore
+*.p12
+GemTower.properties
+signing.properties
