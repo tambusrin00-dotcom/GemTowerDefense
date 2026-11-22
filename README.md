@@ -93,3 +93,7 @@ store/                Play 스토어 등록 자료 (문구, 그래픽, 개인정
 
 이 앱은 어떤 개인정보도 수집하지 않습니다.
 https://tambusrin00-dotcom.github.io/GemTowerDefense/
+
+## 라이선스
+
+[MIT License](LICENSE)
