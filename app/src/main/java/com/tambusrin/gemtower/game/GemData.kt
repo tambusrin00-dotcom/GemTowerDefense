@@ -20,7 +20,8 @@ enum class GemQuality(val label: String, val baseDamage: Float) {
     PERFECT("완벽한", 200f),
 }
 
-enum class SpecialKind(val label: String) {
+/** hidden = 조합법 없이 아주 낮은 확률로만 나오는 히든 보석 */
+enum class SpecialKind(val label: String, val hidden: Boolean = false) {
     // 하급
     FROST_SPIRE("서리 첨탑"),
     VENOM_FANG("맹독 송곳니"),
@@ -37,6 +38,8 @@ enum class SpecialKind(val label: String) {
     // 상급
     STAR_HEART("별의 심장"),
     CHAOS_RIFT("혼돈의 균열"),
+    // 히든 (조합 불가, 보석을 놓을 때 0.000001% 확률)
+    URANIUM("우라늄", hidden = true),
 }
 
 data class GemStats(
@@ -103,6 +106,9 @@ object GemDB {
 
     const val MAX_SPECIAL_LEVEL = 5
     fun specialUpgradeCost(level: Int) = 60 + 60 * level
+
+    /** 보석을 하나 놓을 때 히든 보석(우라늄)이 나올 확률: 0.000001% = 1e-8 */
+    const val HIDDEN_CHANCE = 1e-8
 
     val tierNames = listOf("하급", "중급", "상급")
 
@@ -211,8 +217,11 @@ object GemDB {
             SpecialKind.CHAOS_RIFT -> GemStats(n, 0xFFE040FB.toInt(), 900f, range = 5.5f, cooldown = 0.7f,
                 chainCount = 6, chainRange = 3f, chainPct = 0.85f, poisonDps = 400f, poisonDur = 4f, airMult = 2f,
                 desc = "혼돈의 번개가 6번 튕기며 독을 퍼뜨립니다.")
+            // 공격력은 Game.refreshHiddenGems()가 매 프레임 "필드의 다른 모든 보석 공격력 합"으로 채움
+            SpecialKind.URANIUM -> GemStats(n, 0xFF9CFF3A.toInt(), 0f, range = 4.5f, cooldown = 1f,
+                desc = "히든 보석! 필드에 있는 다른 모든 보석의 공격력을 합친 만큼 피해를 줍니다.")
         }
-        if (level <= 0) return base
+        if (level <= 0 || k.hidden) return base
         val m = 1.7f.pow(level)
         return base.copy(
             name = "${base.name} +$level",

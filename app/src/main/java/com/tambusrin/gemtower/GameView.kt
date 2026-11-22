@@ -542,6 +542,22 @@ class GameView(context: Context) : View(context) {
             val gap = cs * 0.13f
             val startX = px - gap * (n - 1) / 2f
             for (i in 0 until n) c.drawCircle(startX + gap * i, py + cs * 0.33f, cs * 0.045f, fill)
+        } else if (sp.hidden) {
+            // 우라늄: 맥동하는 초록 빛 + 방사능 표시
+            val pulse = sin(game.time * 4f) * 0.5f + 0.5f
+            fill.color = t.stats.color
+            fill.alpha = (50 + pulse * 70).toInt()
+            c.drawCircle(px, py, cs * (0.44f + pulse * 0.06f), fill)
+            fill.alpha = 255
+            fill.color = t.stats.color
+            c.drawCircle(px, py, cs * 0.34f, fill)
+            fill.color = 0xFF1A1F0E.toInt()
+            tmpRect.set(px - cs * 0.28f, py - cs * 0.28f, px + cs * 0.28f, py + cs * 0.28f)
+            for (i in 0 until 3) c.drawArc(tmpRect, -120f + i * 120f + game.time * 30f, 60f, true, fill)
+            fill.color = t.stats.color
+            c.drawCircle(px, py, cs * 0.09f, fill)
+            fill.color = 0xFF1A1F0E.toInt()
+            c.drawCircle(px, py, cs * 0.055f, fill)
         } else {
             fill.color = darken(t.stats.color, 0.4f)
             c.drawCircle(px, py, cs * 0.38f, fill)
@@ -714,7 +730,7 @@ class GameView(context: Context) : View(context) {
         var y = panelRect.top + pad
 
         y += drawWrapped(c, "보석 타워 디펜스", x, y, w, dp(17f), GOLD, bold = true) + dp(4f)
-        y += drawWrapped(c, "웨이브 ${game.wave} / ${Game.MAX_WAVE}", x, y, w, dp(14f), Color.WHITE, bold = true) + dp(2f)
+        y += drawWrapped(c, "웨이브 ${game.wave}", x, y, w, dp(14f), Color.WHITE, bold = true) + dp(2f)
         y += drawWrapped(c, "생명 ${game.lives}    골드 ${game.gold}G", x, y, w, dp(14f), 0xFFFFE9A8.toInt(), bold = true) + dp(8f)
 
         // 하단 고정 버튼 영역
@@ -835,7 +851,7 @@ class GameView(context: Context) : View(context) {
         }
         val t = game.towerAt(sel) ?: return out
 
-        if (t.kept && t.special != null && t.specialLevel < GemDB.MAX_SPECIAL_LEVEL) {
+        if (t.kept && t.special != null && t.special?.hidden != true && t.specialLevel < GemDB.MAX_SPECIAL_LEVEL) {
             val cost = GemDB.specialUpgradeCost(t.specialLevel)
             out += Act("특수 보석 강화 (${cost}G)", "강화 ${cost}G", game.isBuildState && game.gold >= cost, BTN_PURPLE) { game.upgradeSpecial(t) }
         }
@@ -866,7 +882,7 @@ class GameView(context: Context) : View(context) {
     private fun drawSideStatus(c: Canvas, x: Float, y0: Float, w: Float): Float {
         class Line(val s: String, val size: Float, val color: Int, val bold: Boolean)
         val lines = ArrayList<Line>()
-        lines += Line("웨이브 ${game.wave}/${Game.MAX_WAVE}", dp(14f), Color.WHITE, true)
+        lines += Line("웨이브 ${game.wave}", dp(14f), Color.WHITE, true)
         lines += Line("생명 ${game.lives} · ${game.gold}G", dp(13f), 0xFFFFE9A8.toInt(), true)
         val hint = when {
             game.movingFrom != null -> "옮길 칸을 누르세요"

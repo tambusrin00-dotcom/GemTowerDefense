@@ -79,6 +79,18 @@ class ScreenshotActivity : Activity() {
                 view.debugSetSpeed(3)
                 g.debugStartWave()
             }
+            "hidden" -> {
+                // 히든 보석(우라늄)이 이번 라운드에 나온 장면
+                g.debugSetup(wave = 12, gold = 80, chanceLevel = 5, lives = 19)
+                buildMaze(g, 50, earlyGems, rng)
+                var u: Cell? = null
+                listOf(RUBY, TOPAZ, EMERALD, DIAMOND, SAPPHIRE).forEachIndexed { i, type ->
+                    val c = bestCells(g, 1, rng).first()
+                    g.placeGem(c, type, NORMAL, hidden = i == 2)
+                    if (i == 2) u = c
+                }
+                g.selected = u
+            }
             "choose", "recipes" -> {
                 g.debugSetup(wave = 9, gold = 64, chanceLevel = 4, lives = 19)
                 buildMaze(g, 40, earlyGems, rng)

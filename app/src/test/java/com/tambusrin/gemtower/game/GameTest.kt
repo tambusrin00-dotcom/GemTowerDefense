@@ -192,4 +192,30 @@ class GameTest {
         assertFalse(g.waveInfo(20).flying)
         assertTrue(g.waveInfo(30).hp > g.waveInfo(29).hp)
     }
+
+    @Test
+    fun endlessWavesKeepGettingHarderUpTo1000() {
+        val g = newGame()
+        // 1~30웨이브는 기존 곡선 그대로 (일반 웨이브 적 10마리)
+        assertEquals(10, g.waveInfo(29).count)
+        for (w in 31..Game.MAX_WAVE) {
+            val info = g.waveInfo(w)
+            assertTrue("wave $w hp must be finite", info.hp.isFinite() && info.hp > 0f)
+            assertTrue(info.count >= 1)
+            // 웨이브 종류 주기(20) 단위로 같은 종류끼리 비교하면 항상 더 강함
+            if (w > 50) assertTrue("wave $w", info.hp > g.waveInfo(w - 20).hp)
+        }
+        assertTrue(g.waveInfo(200).count > g.waveInfo(31).count || g.waveInfo(200).speed > g.waveInfo(31).speed)
+    }
+
+    @Test
+    fun gameContinuesAfterWave30() {
+        val g = newGame()
+        g.debugSetup(wave = 30, gold = 0, chanceLevel = 0, lives = 20)
+        g.debugStartWave()
+        var time = 0f
+        while (g.state == GameState.WAVE && time < 300f) { g.update(0.05f); time += 0.05f }
+        assertEquals(GameState.BUILD_PLACE, g.state)
+        assertEquals(31, g.wave)
+    }
 }

@@ -10,7 +10,7 @@ class SpecialGemTest {
     @Test
     fun everySpecialHasExactlyOneValidRecipe() {
         assertEquals(13, GemDB.recipes.size)
-        for (k in SpecialKind.entries) {
+        for (k in SpecialKind.entries.filterNot { it.hidden }) {  // 히든 보석은 조합법 없음
             assertEquals("recipe count for $k", 1, GemDB.recipes.count { it.result == k })
         }
         // 재료 조합이 같은 조합법이 없어야 함

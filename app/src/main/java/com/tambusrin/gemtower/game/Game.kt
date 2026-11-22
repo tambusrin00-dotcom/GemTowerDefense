@@ -1,6 +1,7 @@
 package com.tambusrin.gemtower.game
 
 import java.util.ArrayDeque
+import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.pow
 import kotlin.math.sqrt
@@ -52,6 +53,11 @@ class Tower(cell: Cell, type: GemType, quality: GemQuality) {
 
     internal fun refresh() {
         stats = special?.let { GemDB.special(it, specialLevel) } ?: GemDB.stats(type, quality)
+    }
+
+    /** 히든 보석은 다른 보석 상태에 따라 공격력이 바뀜 */
+    internal fun setDamage(d: Float) {
+        if (stats.damage != d) stats = stats.copy(damage = d)
     }
 }
 
@@ -150,7 +156,9 @@ class Game(private val rng: Random = Random.Default) {
         const val W = 19
         const val H = 19
         const val GEMS_PER_ROUND = 5
-        const val MAX_WAVE = 30
+        const val MAX_WAVE = 1000          // 최종 웨이브 (화면에는 표시하지 않음)
+        const val ENDLESS_FROM = 30        // 이 웨이브 이후로 난이도가 계속 상승
+        const val ENDLESS_HP_GROWTH = 1.08f
         const val START_LIVES = 20
         const val ROCK_REMOVE_COST = 10
         const val MOVE_COST = 15
@@ -410,8 +418,10 @@ class Game(private val rng: Random = Random.Default) {
         c: Cell,
         type: GemType = GemType.entries[rng.nextInt(GemType.entries.size)],
         quality: GemQuality = GemDB.rollQuality(chanceLevel, rng),
+        hidden: Boolean = rng.nextDouble() < GemDB.HIDDEN_CHANCE,
     ): Tower {
         val t = Tower(c, type, quality)
+        if (hidden) t.setGem(type, quality, SpecialKind.URANIUM)
         cells[c.x][c.y] = CellType.GEM
         towers[c.x][c.y] = t
         roundGems.add(t)
@@ -421,7 +431,24 @@ class Game(private val rng: Random = Random.Default) {
             selected = null
             showMessage("남길 보석 하나를 눌러 선택하세요")
         }
+        if (hidden) showMessage("✦ 히든 보석 「우라늄」 발견! ✦")
+        refreshHiddenGems()
         return t
+    }
+
+    /** 히든 보석(우라늄) 공격력 = 필드에 있는 다른 모든 보석(이번 라운드 보석 포함) 공격력의 합 */
+    internal fun refreshHiddenGems() {
+        var sum = 0f
+        var any = false
+        for (x in 0 until W) for (y in 0 until H) {
+            val t = towers[x][y] ?: continue
+            if (t.special?.hidden == true) any = true else sum += t.stats.damage
+        }
+        if (!any) return
+        for (x in 0 until W) for (y in 0 until H) {
+            val t = towers[x][y] ?: continue
+            if (t.special?.hidden == true) t.setDamage(sum)
+        }
     }
 
     fun removeRock(c: Cell) {
@@ -502,7 +529,7 @@ class Game(private val rng: Random = Random.Default) {
     }
 
     fun upgradeSpecial(t: Tower) {
-        if (t.special == null || !t.kept || !isBuildState || t.specialLevel >= GemDB.MAX_SPECIAL_LEVEL) return
+        if (t.special == null || t.special?.hidden == true || !t.kept || !isBuildState || t.specialLevel >= GemDB.MAX_SPECIAL_LEVEL) return
         val cost = GemDB.specialUpgradeCost(t.specialLevel)
         if (gold < cost) return
         gold -= cost
@@ -569,14 +596,23 @@ class Game(private val rng: Random = Random.Default) {
 
     // ------------------------------------------------------------------ 웨이브
 
+    /**
+     * 웨이브 구성. 1~30웨이브는 기존 곡선 그대로이고,
+     * 30웨이브 이후(무한 모드)는 체력이 웨이브마다 8%씩 계속 오르고 적 수·속도도 천천히 늘어난다.
+     * 체력은 1000웨이브에서도 Float 범위(약 3.4e38) 안에 머물도록 성장률을 낮춤 (1000웨이브 보스 ≈ 1e37).
+     */
     fun waveInfo(w: Int): WaveInfo {
-        val hp = 15f * 1.21f.pow(w - 1) + 4f * w
+        val extra = max(0, w - ENDLESS_FROM)                 // 30웨이브를 넘긴 만큼
+        val base = min(w, ENDLESS_FROM)
+        val hp = (15f * 1.21f.pow(base - 1) + 4f * base) * ENDLESS_HP_GROWTH.pow(extra)
+        val count = 10 + min(extra / 10, 15)                 // 10웨이브마다 +1마리, 최대 25마리
+        val speedMul = 1f + min(extra * 0.004f, 0.5f)        // 최대 1.5배
         val bounty = 1 + w / 4
         return when {
-            w % 10 == 0 -> WaveInfo(1, hp * 8f, 1.1f, 1f, 20 + w, 5, flying = false, boss = true, label = "보스")
-            w % 4 == 0 -> WaveInfo(10, hp * 0.8f, 1.6f, 1f, bounty, 1, flying = true, boss = false, label = "비행 (미로 무시)")
-            w % 5 == 3 -> WaveInfo(10, hp * 0.7f, 1.6f * 1.7f, 0.6f, bounty, 1, flying = false, boss = false, label = "고속")
-            else -> WaveInfo(10, hp, 1.6f, 1f, bounty, 1, flying = false, boss = false, label = "일반")
+            w % 10 == 0 -> WaveInfo(1 + extra / 100, hp * 8f, 1.1f * speedMul, 1f, 20 + w, 5, flying = false, boss = true, label = "보스")
+            w % 4 == 0 -> WaveInfo(count, hp * 0.8f, 1.6f * speedMul, 1f, bounty, 1, flying = true, boss = false, label = "비행 (미로 무시)")
+            w % 5 == 3 -> WaveInfo(count, hp * 0.7f, 1.6f * 1.7f * speedMul, 0.6f, bounty, 1, flying = false, boss = false, label = "고속")
+            else -> WaveInfo(count, hp, 1.6f * speedMul, 1f, bounty, 1, flying = false, boss = false, label = "일반")
         }
     }
 
@@ -634,10 +670,12 @@ class Game(private val rng: Random = Random.Default) {
     /** 실제 시간 기준 UI 타이머 */
     fun tickUi(dt: Float) {
         if (messageTimer > 0f) messageTimer -= dt
+        refreshHiddenGems()   // 건설 단계에서도 패널의 공격력 표시가 최신이 되게
     }
 
     private fun step(dt: Float) {
         time += dt
+        refreshHiddenGems()
 
         if (state == GameState.WAVE && toSpawn > 0) {
             spawnTimer -= dt
