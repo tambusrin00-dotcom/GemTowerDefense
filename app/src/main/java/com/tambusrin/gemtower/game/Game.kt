@@ -42,6 +42,8 @@ class Tower(cell: Cell, type: GemType, quality: GemQuality) {
     /** 위치 바꾸기를 이미 썼는지 (특수 보석당 1번) */
     var moved = false; internal set
     internal var cooldown = 0f
+    /** 패스로 쌓인 공격력 배율 */
+    internal var damageMul = 1f
 
     internal fun setGem(t: GemType, q: GemQuality, sp: SpecialKind?) {
         type = t
@@ -52,7 +54,8 @@ class Tower(cell: Cell, type: GemType, quality: GemQuality) {
     }
 
     internal fun refresh() {
-        stats = special?.let { GemDB.special(it, specialLevel) } ?: GemDB.stats(type, quality)
+        val base = special?.let { GemDB.special(it, specialLevel) } ?: GemDB.stats(type, quality)
+        stats = if (damageMul == 1f) base else base.copy(damage = base.damage * damageMul, poisonDps = base.poisonDps * damageMul)
     }
 
     /** 히든 보석은 다른 보석 상태에 따라 공격력이 바뀜 */
@@ -160,6 +163,7 @@ class Game(private val rng: Random = Random.Default) {
         const val ENDLESS_FROM = 30        // 이 웨이브 이후로 난이도가 계속 상승
         const val ENDLESS_HP_GROWTH = 1.08f   // 30웨이브 이후 웨이브마다 체력 +8%
         const val DOUBLE_EVERY = 5             // 30웨이브 이후 이 주기마다 체력 2배
+        const val PASS_BONUS_PCT = 0.01f       // 패스 1회당 공격력 상승(%)
         const val START_LIVES = 20
         const val ROCK_REMOVE_COST = 10
         const val MOVE_COST = 15
@@ -213,6 +217,14 @@ class Game(private val rng: Random = Random.Default) {
     val remainingEnemies get() = enemies.size + toSpawn
     val isBuildState get() = state == GameState.BUILD_PLACE || state == GameState.BUILD_CHOOSE
 
+    /** 보석 배치를 패스한 횟수. 패스 1회당 모든 보석 공격력 +0.01% */
+    var passCount = 0; private set
+    val passBonusPct get() = passCount * PASS_BONUS_PCT
+    private val passMultiplier get() = 1f + passBonusPct / 100f
+    /** 이번 라운드 보석을 하나도 놓지 않았고, 공격할 보석이 있을 때만 패스 가능 */
+    val canPass: Boolean
+        get() = state == GameState.BUILD_PLACE && roundGems.isEmpty() && towers.any { col -> col.any { it?.kept == true } }
+
     init {
         newGame()
     }
@@ -235,6 +247,7 @@ class Game(private val rng: Random = Random.Default) {
         lives = START_LIVES
         gold = 0
         chanceLevel = 0
+        passCount = 0
         toSpawn = 0
         bossDamage = 0.0
         bossTime = 0.0
@@ -432,6 +445,8 @@ class Game(private val rng: Random = Random.Default) {
         hidden: Boolean = rng.nextDouble() < GemDB.HIDDEN_CHANCE,
     ): Tower {
         val t = Tower(c, type, quality)
+        t.damageMul = passMultiplier
+        t.refresh()
         if (hidden) t.setGem(type, quality, SpecialKind.URANIUM)
         cells[c.x][c.y] = CellType.GEM
         towers[c.x][c.y] = t
@@ -556,6 +571,18 @@ class Game(private val rng: Random = Random.Default) {
         startWave()
     }
 
+    /** 이번 라운드 보석 배치를 건너뛰고 모든 보석 공격력을 올린 뒤 바로 웨이브 시작 */
+    fun passRound(): Boolean {
+        if (!canPass) return false
+        passCount++
+        for (col in towers) for (t in col) t?.let { it.damageMul = passMultiplier; it.refresh() }
+        refreshHiddenGems()
+        movingFrom = null
+        startWave()
+        showMessage("패스! 모든 보석 공격력 +%.2f%%".format(passBonusPct))
+        return true
+    }
+
     fun upgradeSpecial(t: Tower) {
         if (t.special == null || t.special?.hidden == true || !t.kept || !isBuildState || t.specialLevel >= GemDB.MAX_SPECIAL_LEVEL) return
         val cost = GemDB.specialUpgradeCost(t.specialLevel)
@@ -594,6 +621,8 @@ class Game(private val rng: Random = Random.Default) {
     /** 이미 남겨진(공격하는) 보석을 바로 배치 */
     internal fun debugKeptGem(c: Cell, type: GemType, quality: GemQuality, special: SpecialKind? = null, level: Int = 0): Tower {
         val t = Tower(c, type, quality)
+        t.damageMul = passMultiplier
+        t.refresh()
         if (special != null) {
             t.setGem(type, quality, special)
             t.specialLevel = level

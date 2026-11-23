@@ -180,7 +180,7 @@ class GameTest {
         repeat(GemDB.maxChanceLevel) { g.upgradeChance() }
         assertEquals(GemDB.maxChanceLevel, g.chanceLevel)
         val rng = Random(1)
-        repeat(200) { assertTrue(GemDB.rollQuality(GemDB.maxChanceLevel, rng) != GemQuality.CHIPPED) }
+        assertTrue((1..2000).any { GemDB.rollQuality(GemDB.maxChanceLevel, rng) == GemQuality.PERFECT })
         repeat(200) { assertEquals(GemQuality.CHIPPED, GemDB.rollQuality(0, rng)) }
     }
 

@@ -78,7 +78,7 @@ class ScreenshotActivity : Activity() {
                 g.debugSetup(wave = 17, gold = 85, chanceLevel = 6, lives = 18)
                 buildMaze(g, 70, lateGems, rng)
                 g.selected = findSpecial(g, SpecialKind.STORM_SPIRE)
-                view.debugSetSpeed(2)
+                view.debugSetSpeed(3)
                 g.debugStartWave()
             }
             "boss" -> {

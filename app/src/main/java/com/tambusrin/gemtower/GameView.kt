@@ -88,6 +88,7 @@ class GameView(context: Context) : View(context) {
     private var downRecipeScroll = 0f
     private var downInRecipe = false
     private var newGameArmedUntil = 0L
+    private var passArmedUntil = 0L
     private var flashCell: Cell? = null
     private var flashTime = 0f
 
@@ -174,6 +175,7 @@ class GameView(context: Context) : View(context) {
         const val SIDE_BTN = 0xCC34405A.toInt()
         const val TITLE = "보석 타워 디펜스"
         const val DOWNLOAD_URL = "https://play.google.com/store/apps/details?id=com.tambusrin.gemtower"
+        val SPEEDS = intArrayOf(1, 3, 6)
         val TITLE_GEMS = arrayOf(
             floatArrayOf(0.07f, 0.16f), floatArrayOf(0.93f, 0.12f), floatArrayOf(0.05f, 0.80f),
             floatArrayOf(0.95f, 0.82f), floatArrayOf(0.47f, 0.07f), floatArrayOf(0.44f, 0.90f),
@@ -383,11 +385,12 @@ class GameView(context: Context) : View(context) {
         btn(x + (bw3 + gap) * 2, x + w, "전체", cs > minCs, SIDE_BTN, zoomFit)
         y += bh + gap
         val bw2 = (w - gap) / 2f
-        btn(x, x + bw2, "${speed}x", true, if (speed > 1) BTN_GOLD else SIDE_BTN) { speed = speed % 3 + 1 }
+        qualityAct()?.let { row(it.short, it.enabled, it.color, it.action) }
+        btn(x, x + bw2, "${speed}x", true, if (speed > 1) BTN_GOLD else SIDE_BTN) { speed = SPEEDS[(SPEEDS.indexOf(speed) + 1) % SPEEDS.size] }
         btn(x + bw2 + gap, x + w, "조합법", true, SIDE_BTN) { showRecipes = true }
         y += bh + gap * 2
 
-        qualityAct()?.let { row(it.short, it.enabled, it.color, it.action) }
+        passAct()?.let { row(it.short, it.enabled, it.color, it.action) }
         game.selected?.let { sel -> for (a in selectionActs(sel)) row(a.short, a.enabled, a.color, a.action) }
         c.restore()
 
@@ -403,6 +406,19 @@ class GameView(context: Context) : View(context) {
             val thumbY = sideRect.top + (trackH - thumbH) * (sideScroll / maxScroll)
             fill.color = 0x88FFFFFF.toInt()
             c.drawRoundRect(x - dp(4f), thumbY, x - dp(1.5f), thumbY + thumbH, dp(2f), dp(2f), fill)
+        }
+    }
+
+    /** 보석 배치 패스 (잘못 누르지 않게 두 번 눌러 확정) */
+    private fun passAct(): Act? {
+        if (!game.canPass) return null
+        val armed = System.currentTimeMillis() < passArmedUntil
+        val label = if (armed) "정말 패스? (바로 전투 시작)" else "배치 패스 (공격력 +0.01%)"
+        return Act(label, if (armed) "정말 패스?" else "패스 +0.01%", true, if (armed) BTN_RED else BTN_TEAL) {
+            if (System.currentTimeMillis() < passArmedUntil) {
+                passArmedUntil = 0L
+                game.passRound()
+            } else passArmedUntil = System.currentTimeMillis() + 3000L
         }
     }
 
@@ -822,10 +838,13 @@ class GameView(context: Context) : View(context) {
         val bh = dp(38f)
         val gap = dp(6f)
         val footerTop = panelRect.bottom - pad - bh * 2 - gap
+        val quality = qualityAct()
+        val qualityTop = footerTop - bh - gap
+        quality?.let { a -> button(c, RectF(x, qualityTop, x + w, qualityTop + bh), a.label, a.enabled, a.color, action = a.action) }
         val bw3 = (w - gap * 2) / 3f
-        for (i in 1..3) {
-            val l = x + (i - 1) * (bw3 + gap)
-            button(c, RectF(l, footerTop, l + bw3, footerTop + bh), "${i}x", color = if (speed == i) BTN_GOLD else BTN) { speed = i }
+        SPEEDS.forEachIndexed { index, s ->
+            val l = x + index * (bw3 + gap)
+            button(c, RectF(l, footerTop, l + bw3, footerTop + bh), "${s}x", color = if (speed == s) BTN_GOLD else BTN) { speed = s }
         }
         val bw2 = (w - gap) / 2f
         val row2 = footerTop + bh + gap
@@ -839,7 +858,7 @@ class GameView(context: Context) : View(context) {
         }
 
         // 스크롤 영역
-        scrollRect.set(panelRect.left, y, panelRect.right, footerTop - gap)
+        scrollRect.set(panelRect.left, y, panelRect.right, (if (quality != null) qualityTop else footerTop) - gap)
         contentHeight = drawPanelBody(c, x, w)
         val maxScroll = max(0f, contentHeight - scrollRect.height())
         scrollY = scrollY.coerceIn(0f, maxScroll)
@@ -859,8 +878,10 @@ class GameView(context: Context) : View(context) {
         c.clipRect(scrollRect)
         c.translate(0f, scrollRect.top - scrollY)
         var y = 0f
-        val bh = dp(38f)
-        val gap = dp(6f)
+        passAct()?.let { a ->
+            button(c, RectF(x, y, x + w, y + dp(38f)), a.label, a.enabled, a.color, scrolled = true, action = a.action)
+            y += dp(44f)
+        }
 
         // 선택한 보석의 행동 버튼이 가장 먼저 보이도록 맨 위에 배치
         if (game.selected != null) {
@@ -874,9 +895,8 @@ class GameView(context: Context) : View(context) {
         // 품질 확률
         y += drawWrapped(c, "보석 품질 레벨 ${game.chanceLevel}", x, y, w, dp(14f), Color.WHITE, bold = true) + dp(2f)
         y += drawWrapped(c, GemDB.chanceText(game.chanceLevel), x, y, w, dp(12f), TEXT_DIM) + dp(6f)
-        qualityAct()?.let { a ->
-            button(c, RectF(x, y, x + w, y + bh), a.label, a.enabled, a.color, scrolled = true, action = a.action)
-            y += bh + gap
+        if (game.passCount > 0) {
+            y += drawWrapped(c, "패스 ${game.passCount}회 · 모든 보석 공격력 +%.2f%%".format(game.passBonusPct), x, y, w, dp(12f), 0xFF7FE0D0.toInt()) + dp(6f)
         }
         if (game.selected == null) {
             y = divider(c, x, y + dp(4f), w)
@@ -967,6 +987,7 @@ class GameView(context: Context) : View(context) {
         val lines = ArrayList<Line>()
         lines += Line("웨이브 ${game.wave}", dp(14f), Color.WHITE, true)
         lines += Line("생명 ${game.lives} · ${game.gold}G", dp(13f), 0xFFFFE9A8.toInt(), true)
+        if (game.passCount > 0) lines += Line("공격력 +%.2f%%".format(game.passBonusPct), dp(12f), 0xFF7FE0D0.toInt(), true)
         val hint = when {
             game.movingFrom != null -> "옮길 칸을 누르세요"
             game.state == GameState.BUILD_PLACE -> "보석 배치 ${game.roundGems.size}/${Game.GEMS_PER_ROUND}\n다음: ${game.waveInfo(game.wave).label}"

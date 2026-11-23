@@ -10,7 +10,7 @@ class SpecialGemTest {
 
     @Test
     fun everySpecialHasExactlyOneValidRecipe() {
-        assertEquals(17, GemDB.recipes.size)
+        assertEquals(21, GemDB.recipes.size)
         for (k in SpecialKind.entries.filterNot { it.hidden }) {  // 히든 보석은 조합법 없음
             assertEquals("recipe count for $k", 1, GemDB.recipes.count { it.result == k })
         }
@@ -26,7 +26,7 @@ class SpecialGemTest {
             }
             assertTrue(GemDB.special(r.result).desc.isNotEmpty())
         }
-        assertEquals(listOf(9, 3, 2, 3), (0..3).map { t -> GemDB.recipes.count { it.tier == t } })
+        assertEquals(listOf(9, 3, 6, 3), (0..3).map { t -> GemDB.recipes.count { it.tier == t } })
     }
 
     @Test
@@ -54,6 +54,24 @@ class SpecialGemTest {
     fun usedAsIngredientLookup() {
         val uses = GemDB.recipesUsing(GemKey(GemType.SAPPHIRE, GemQuality.NORMAL)).map { it.result }.toSet()
         assertEquals(setOf(SpecialKind.FROST_SPIRE, SpecialKind.CRYSTAL_PRISON, SpecialKind.NEBULA_CANNON, SpecialKind.THUNDER_HAMMER), uses)
+    }
+
+    @Test
+    fun everyPerfectGemHasARecipe() {
+        for (t in GemType.entries) {
+            val key = GemKey(t, GemQuality.PERFECT)
+            assertEquals("${key}", 1, GemDB.recipesUsing(key).size)
+            assertEquals(2, GemDB.recipesUsing(key).single().tier)
+        }
+    }
+
+    @Test
+    fun maxQualityLevelStillRollsChippedRarely() {
+        val rng = Random(11)
+        val n = 20000
+        val chipped = (1..n).count { GemDB.rollQuality(GemDB.maxChanceLevel, rng) == GemQuality.CHIPPED }
+        assertEquals(0.05, chipped.toDouble() / n, 0.01)
+        assertTrue(GemDB.chanceText(GemDB.maxChanceLevel).startsWith("깨진 5%"))
     }
 
     /** 경로 바로 옆에 특수 보석 하나를 두고 웨이브를 시작한 게임 */
@@ -122,6 +140,13 @@ class SpecialGemTest {
         while (!e.dead && g.state == GameState.WAVE && time < 300f) { g.update(0.02f); time += 0.02f }
         assertTrue(e.dead)
         assertTrue(t.kills >= 1)
+    }
+
+    @Test
+    fun chaosRiftDealsTenTimesToAir() {
+        assertEquals(10f, GemDB.special(SpecialKind.CHAOS_RIFT).airMult, 0f)
+        assertEquals(10f, GemDB.special(SpecialKind.CHAOS_RIFT, 3).airMult, 0f)
+        assertTrue(GemDB.describe(GemDB.special(SpecialKind.CHAOS_RIFT)).any { "x10.0" in it })
     }
 
     @Test

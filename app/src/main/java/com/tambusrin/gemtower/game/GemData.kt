@@ -39,6 +39,10 @@ enum class SpecialKind(val label: String, val hidden: Boolean = false) {
     // 상급
     STAR_HEART("별의 심장"),
     CHAOS_RIFT("혼돈의 균열"),
+    VOLCANO_HEART("화산의 심장"),
+    ABYSS_TIDE("심연의 해일"),
+    WORLD_TREE("맹독 세계수"),
+    SKY_ARROW("천공의 화살"),
     // 전설 (특수 보석 2개 + 무결점 보석)
     ABSOLUTE_ZERO("절대영도"),
     THUNDER_GOD("뇌신의 심판"),
@@ -111,7 +115,7 @@ object GemDB {
         intArrayOf(30, 30, 30, 10, 0),
         intArrayOf(20, 30, 30, 20, 0),
         intArrayOf(10, 30, 30, 30, 0),
-        intArrayOf(0, 30, 30, 30, 10),
+        intArrayOf(5, 25, 30, 30, 10),
     )
 
     val maxChanceLevel get() = chanceTable.size - 1
@@ -150,6 +154,10 @@ object GemDB {
         // ---- 상급: 완벽한 + 무결점 ----
         Recipe(SpecialKind.STAR_HEART, listOf(k(GemType.DIAMOND, P), k(GemType.RUBY, FL), k(GemType.SAPPHIRE, FL))),
         Recipe(SpecialKind.CHAOS_RIFT, listOf(k(GemType.AMETHYST, P), k(GemType.EMERALD, FL), k(GemType.TOPAZ, FL))),
+        Recipe(SpecialKind.VOLCANO_HEART, listOf(k(GemType.RUBY, P), k(GemType.TOPAZ, FL), k(GemType.DIAMOND, FL))),
+        Recipe(SpecialKind.ABYSS_TIDE, listOf(k(GemType.SAPPHIRE, P), k(GemType.EMERALD, FL), k(GemType.AMETHYST, FL))),
+        Recipe(SpecialKind.WORLD_TREE, listOf(k(GemType.EMERALD, P), k(GemType.SAPPHIRE, FL), k(GemType.DIAMOND, FL))),
+        Recipe(SpecialKind.SKY_ARROW, listOf(k(GemType.TOPAZ, P), k(GemType.RUBY, FL), k(GemType.AMETHYST, FL))),
         // ---- 전설: 특수 보석 2개 + 무결점 (재료 특수 보석은 바위가 되고 강화 단계도 사라짐) ----
         Recipe(SpecialKind.ABSOLUTE_ZERO, listOf(k(GemType.SAPPHIRE, FL)), listOf(SpecialKind.FROST_SPIRE, SpecialKind.CRYSTAL_PRISON)),
         Recipe(SpecialKind.THUNDER_GOD, listOf(k(GemType.TOPAZ, FL)), listOf(SpecialKind.STORM_SPIRE, SpecialKind.THUNDER_HAMMER)),
@@ -239,8 +247,20 @@ object GemDB {
                 splashRadius = 2.2f, splashPct = 0.6f, critChance = 0.3f, critMult = 3f,
                 desc = "별의 힘으로 모든 것을 태웁니다.")
             SpecialKind.CHAOS_RIFT -> GemStats(n, 0xFFE040FB.toInt(), 900f, range = 5.5f, cooldown = 0.7f,
-                chainCount = 6, chainRange = 3f, chainPct = 0.85f, poisonDps = 400f, poisonDur = 4f, airMult = 2f,
-                desc = "혼돈의 번개가 6번 튕기며 독을 퍼뜨립니다.")
+                chainCount = 6, chainRange = 3f, chainPct = 0.85f, poisonDps = 400f, poisonDur = 4f, airMult = 10f,
+                desc = "혼돈의 번개가 6번 튕기며 독을 퍼뜨립니다. 공중 유닛에게 10배 피해를 줍니다.")
+            SpecialKind.VOLCANO_HEART -> GemStats(n, 0xFFFF5722.toInt(), 1700f, range = 4.5f, cooldown = 1.1f,
+                splashRadius = 2.6f, splashPct = 0.8f,
+                desc = "화산처럼 폭발해 아주 넓은 범위를 불태웁니다.")
+            SpecialKind.ABYSS_TIDE -> GemStats(n, 0xFF2979FF.toInt(), 1100f, range = 5f, cooldown = 0.8f,
+                splashRadius = 2f, splashPct = 0.5f, slowPct = 0.6f, slowDur = 3f,
+                desc = "거대한 해일로 넓은 범위의 적을 크게 둔화시킵니다.")
+            SpecialKind.WORLD_TREE -> GemStats(n, 0xFF00E676.toInt(), 700f, range = 4.8f, cooldown = 0.8f,
+                poisonDps = 450f, poisonDur = 4f, targets = 5,
+                desc = "다섯 명에게 동시에 맹독을 퍼뜨립니다.")
+            SpecialKind.SKY_ARROW -> GemStats(n, 0xFFFFD740.toInt(), 1000f, range = 5.2f, cooldown = 0.6f,
+                targets = 6, airMult = 2f,
+                desc = "여섯 명을 빠르게 동시에 꿰뚫습니다. 공중 유닛에 강합니다.")
             SpecialKind.ABSOLUTE_ZERO -> GemStats(n, 0xFFD6F6FF.toInt(), 2600f, range = 5f, cooldown = 1f,
                 splashRadius = 2.2f, splashPct = 0.6f, slowPct = 0.7f, slowDur = 3f, stunChance = 0.3f, stunDur = 1.5f,
                 desc = "모든 것을 얼려 멈춥니다. 넓은 범위를 크게 둔화시키고 기절시킵니다.")
