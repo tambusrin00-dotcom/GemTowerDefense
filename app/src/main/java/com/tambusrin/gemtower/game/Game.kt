@@ -156,9 +156,10 @@ class Game(private val rng: Random = Random.Default) {
         const val W = 19
         const val H = 19
         const val GEMS_PER_ROUND = 5
-        const val MAX_WAVE = 1000          // 최종 웨이브 (화면에는 표시하지 않음)
+        const val MAX_WAVE = 201           // 최종 보스 웨이브 (화면에는 표시하지 않음)
         const val ENDLESS_FROM = 30        // 이 웨이브 이후로 난이도가 계속 상승
-        const val ENDLESS_HP_GROWTH = 1.08f
+        const val ENDLESS_HP_GROWTH = 1.08f   // 30웨이브 이후 웨이브마다 체력 +8%
+        const val DOUBLE_EVERY = 5             // 30웨이브 이후 이 주기마다 체력 2배
         const val START_LIVES = 20
         const val ROCK_REMOVE_COST = 10
         const val MOVE_COST = 15
@@ -199,6 +200,13 @@ class Game(private val rng: Random = Random.Default) {
     /** 애니메이션용 누적 게임 시간 */
     var time = 0f; private set
 
+    // 기록용 (전투 시간은 배속과 무관한 게임 시간)
+    private var bossDamage = 0.0
+    private var bossTime = 0.0
+    private var battleTime = 0.0
+    /** 게임 오버 또는 승리 순간에 한 번 호출 */
+    var onFinished: ((GameRecord) -> Unit)? = null
+
     private var toSpawn = 0
     private var spawnTimer = 0f
 
@@ -228,6 +236,9 @@ class Game(private val rng: Random = Random.Default) {
         gold = 0
         chanceLevel = 0
         toSpawn = 0
+        bossDamage = 0.0
+        bossTime = 0.0
+        battleTime = 0.0
         selected = null
         movingFrom = null
         state = GameState.BUILD_PLACE
@@ -615,13 +626,15 @@ class Game(private val rng: Random = Random.Default) {
 
     /**
      * 웨이브 구성. 1~30웨이브는 기존 곡선 그대로이고,
-     * 30웨이브 이후(무한 모드)는 체력이 웨이브마다 8%씩 계속 오르고 적 수·속도도 천천히 늘어난다.
-     * 체력은 1000웨이브에서도 Float 범위(약 3.4e38) 안에 머물도록 성장률을 낮춤 (1000웨이브 보스 ≈ 1e37).
+     * 30웨이브 이후는 체력이 웨이브마다 8%씩 오르고, 5의 배수 웨이브(35, 40, ...)마다 추가로 2배가 되며
+     * 적 수·속도도 천천히 늘어난다.
+     * 200웨이브 보스 체력은 약 2.5e20으로 Float 범위(약 3.4e38) 안에 머문다.
      */
-    fun waveInfo(w: Int): WaveInfo {
+    private fun normalWave(w: Int): WaveInfo {
         val extra = max(0, w - ENDLESS_FROM)                 // 30웨이브를 넘긴 만큼
         val base = min(w, ENDLESS_FROM)
-        val hp = (15f * 1.21f.pow(base - 1) + 4f * base) * ENDLESS_HP_GROWTH.pow(extra)
+        val doublings = max(0, w / DOUBLE_EVERY - ENDLESS_FROM / DOUBLE_EVERY) // 35웨이브부터 5웨이브마다 1회
+        val hp = (15f * 1.21f.pow(base - 1) + 4f * base) * ENDLESS_HP_GROWTH.pow(extra) * 2f.pow(doublings)
         val count = 10 + min(extra / 10, 15)                 // 10웨이브마다 +1마리, 최대 25마리
         val speedMul = 1f + min(extra * 0.004f, 0.5f)        // 최대 1.5배
         val bounty = 1 + w / 4
@@ -632,6 +645,19 @@ class Game(private val rng: Random = Random.Default) {
             else -> WaveInfo(count, hp, 1.6f * speedMul, 1f, bounty, 1, flying = false, boss = false, label = "일반")
         }
     }
+
+    /** 최종 보스 체력 = 1~200웨이브에 나오는 모든 적의 체력 합 (Double로 더해 오차를 줄임) */
+    private val finalBossHp by lazy {
+        (1 until MAX_WAVE).sumOf { w -> normalWave(w).let { it.count.toDouble() * it.hp } }.toFloat()
+    }
+
+    fun waveInfo(w: Int): WaveInfo =
+        if (w >= MAX_WAVE) {
+            // 도착하면 남은 생명과 상관없이 게임 오버 (그냥 흘려보내고 승리하는 것을 막음)
+            WaveInfo(1, finalBossHp, 1.65f, 1f, 20 + w, START_LIVES, flying = false, boss = true, label = "최종 보스")
+        } else {
+            normalWave(w)
+        }
 
     private fun startWave() {
         currentWave = waveInfo(wave)
@@ -653,12 +679,17 @@ class Game(private val rng: Random = Random.Default) {
         gold += bonus
         if (wave >= MAX_WAVE) {
             state = GameState.VICTORY
+            finish(cleared = true)
             showMessage("모든 웨이브를 막아냈습니다!")
             return
         }
         wave++
         state = GameState.BUILD_PLACE
         showMessage("웨이브 클리어! +${bonus}G · 보석 5개를 배치하세요")
+    }
+
+    private fun finish(cleared: Boolean) {
+        onFinished?.invoke(GameRecord.of(bossDamage, bossTime, battleTime, lives, gold, wave, cleared))
     }
 
     private fun leak(e: Enemy) {
@@ -668,6 +699,7 @@ class Game(private val rng: Random = Random.Default) {
         if (lives <= 0) {
             lives = 0
             state = GameState.GAME_OVER
+            finish(cleared = false)
             showMessage("생명이 모두 소진되었습니다")
         }
     }
@@ -693,6 +725,10 @@ class Game(private val rng: Random = Random.Default) {
     private fun step(dt: Float) {
         time += dt
         refreshHiddenGems()
+        if (state == GameState.WAVE) {
+            battleTime += dt
+            if (currentWave.boss) bossTime += dt
+        }
 
         if (state == GameState.WAVE && toSpawn > 0) {
             spawnTimer -= dt
@@ -840,6 +876,7 @@ class Game(private val rng: Random = Random.Default) {
         if (e.dead || dmg <= 0f) return
         val applied = min(e.hp, dmg)
         e.hp -= dmg
+        if (e.boss) bossDamage += applied
         if (src != null) src.totalDamage += applied
         if (e.hp <= 0f) {
             e.dead = true

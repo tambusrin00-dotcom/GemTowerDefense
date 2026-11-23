@@ -1,8 +1,13 @@
 package com.tambusrin.gemtower
 
 import android.annotation.SuppressLint
+import android.content.ActivityNotFoundException
 import android.content.Context
+import android.content.Intent
 import android.graphics.Canvas
+import android.graphics.LinearGradient
+import android.graphics.RadialGradient
+import android.graphics.Shader
 import android.graphics.Color
 import android.graphics.DashPathEffect
 import android.graphics.Paint
@@ -20,15 +25,18 @@ import android.view.MotionEvent
 import android.view.ScaleGestureDetector
 import android.view.View
 import android.view.ViewConfiguration
+import android.widget.Toast
 import android.view.WindowInsets
 import com.tambusrin.gemtower.game.Beam
 import com.tambusrin.gemtower.game.Cell
 import com.tambusrin.gemtower.game.CellType
 import com.tambusrin.gemtower.game.Game
+import com.tambusrin.gemtower.game.GameRecord
 import com.tambusrin.gemtower.game.GameState
 import com.tambusrin.gemtower.game.GemDB
 import com.tambusrin.gemtower.game.GemKey
 import com.tambusrin.gemtower.game.GemQuality
+import com.tambusrin.gemtower.game.Leaderboard
 import com.tambusrin.gemtower.game.Tower
 import kotlin.math.abs
 import kotlin.math.cos
@@ -82,6 +90,28 @@ class GameView(context: Context) : View(context) {
     private var newGameArmedUntil = 0L
     private var flashCell: Cell? = null
     private var flashTime = 0f
+
+    // ---- 시작 화면 / 기록 ----
+    private enum class Screen { TITLE, RECORDS, GAME }
+    private var screen = Screen.TITLE
+    private val recordStore = RecordStore(context)
+    private var records = recordStore.load()
+    private var lastRecord: GameRecord? = null   // 방금 끝난 판
+    private var lastRank: Int? = null
+    private var recordsScroll = 0f
+    private var downRecordsScroll = 0f
+    private var menuTime = 0f
+    private var menuDown = false
+    private val titlePaint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val titleText = TextPaint(Paint.ANTI_ALIAS_FLAG)
+    private var titleBg: Shader? = null
+    private var titleBgW = 0
+    private var titleBgH = 0
+    private var titleTextShader: Shader? = null
+    private var titleTextY = 0f
+    private val titleGlow = RadialGradient(
+        0f, 0f, 1f, intArrayOf(0x88A866F2.toInt(), 0x2A7B30D2, 0x007B30D2), floatArrayOf(0f, 0.55f, 1f), Shader.TileMode.CLAMP,
+    )
 
     private class Button(val rect: RectF, val enabled: Boolean, val action: () -> Unit)
     private val buttons = ArrayList<Button>()
@@ -142,11 +172,32 @@ class GameView(context: Context) : View(context) {
         const val MISSING = 0xFF7A8290.toInt()
         const val DEFAULT_CELL_DP = 34f
         const val SIDE_BTN = 0xCC34405A.toInt()
+        const val TITLE = "보석 타워 디펜스"
+        const val DOWNLOAD_URL = "https://play.google.com/store/apps/details?id=com.tambusrin.gemtower"
+        val TITLE_GEMS = arrayOf(
+            floatArrayOf(0.07f, 0.16f), floatArrayOf(0.93f, 0.12f), floatArrayOf(0.05f, 0.80f),
+            floatArrayOf(0.95f, 0.82f), floatArrayOf(0.47f, 0.07f), floatArrayOf(0.44f, 0.90f),
+        )
+        val TITLE_GEM_COLORS = intArrayOf(
+            0xFFFF4D6A.toInt(), 0xFF4D8DFF.toInt(), 0xFF3FE08A.toInt(),
+            0xFFFFC93C.toInt(), 0xFFE8F0FF.toInt(), 0xFFB56BFF.toInt(),
+        )
+        val TITLE_ROUTE = floatArrayOf(
+            0f, 0.86f, 0.14f, 0.86f, 0.14f, 0.34f, 0.34f, 0.34f, 0.34f, 0.08f, 0.62f, 0.08f,
+            0.62f, 0.94f, 0.84f, 0.94f, 0.84f, 0.40f, 1f, 0.40f,
+        )
     }
 
     init {
         isFocusable = true
         keepScreenOn = true
+        game.onFinished = { r ->
+            val (list, rank) = Leaderboard.add(records, r)
+            records = list
+            lastRecord = r
+            lastRank = rank
+            if (rank != null) recordStore.save(list)
+        }
     }
 
     /** 스크린샷용 */
@@ -158,6 +209,19 @@ class GameView(context: Context) : View(context) {
     /** 스크린샷용: 처음부터 보드 전체가 보이는 배율로 시작 */
     internal fun debugStartZoomFit() {
         startZoomFit = true
+    }
+
+    /** 스크린샷용: 시작 화면을 건너뜀 (keepRecords가 아니면 기록도 저장하지 않음) */
+    internal fun debugSkipTitle(keepRecords: Boolean = false) {
+        screen = Screen.GAME
+        if (!keepRecords) game.onFinished = null
+    }
+
+    /** 스크린샷용: 저장하지 않고 예시 기록을 보여 줌 */
+    internal fun debugShowRecords(list: List<GameRecord>, highlight: Int) {
+        records = list
+        lastRecord = list.getOrNull(highlight)
+        screen = Screen.RECORDS
     }
 
     internal fun debugSetSpeed(s: Int) {
@@ -182,8 +246,11 @@ class GameView(context: Context) : View(context) {
         if (!running) return
         if (lastFrameNanos != 0L) {
             val dt = ((nanos - lastFrameNanos) / 1e9f).coerceIn(0f, 0.1f)
-            game.update(dt * speed)
-            game.tickUi(dt)
+            if (screen != Screen.GAME) menuTime += dt
+            if (screen == Screen.GAME) {
+                game.update(dt * speed)
+                game.tickUi(dt)
+            }
             if (flashTime > 0f) flashTime -= dt
         }
         lastFrameNanos = nanos
@@ -356,6 +423,8 @@ class GameView(context: Context) : View(context) {
         canvas.drawColor(BG)
         buttons.clear()
         if (cs <= 1f) computeLayout()
+        if (screen == Screen.TITLE) { drawTitle(canvas); return }
+        if (screen == Screen.RECORDS) { drawRecords(canvas); return }
 
         canvas.save()
         canvas.clipRect(viewRect)
@@ -653,11 +722,21 @@ class GameView(context: Context) : View(context) {
             text.typeface = Typeface.DEFAULT_BOLD
             text.textSize = dp(44f)
             text.color = if (game.state == GameState.VICTORY) GOLD else Color.WHITE
-            c.drawText(if (game.state == GameState.VICTORY) "승리!" else "게임 오버", viewRect.centerX(), viewRect.centerY() - dp(10f), text)
+            c.drawText(if (game.state == GameState.VICTORY) "승리!" else "게임 오버", viewRect.centerX(), viewRect.centerY() - dp(52f), text)
             text.typeface = Typeface.DEFAULT
-            val bw = dp(160f)
-            val r = RectF(viewRect.centerX() - bw / 2, viewRect.centerY() + dp(16f), viewRect.centerX() + bw / 2, viewRect.centerY() + dp(60f))
-            button(c, r, "다시 하기", color = BTN_GREEN) { game.newGame(); scrollY = 0f }
+            lastRecord?.let { r ->
+                text.textSize = dp(14f)
+                text.color = TEXT_DIM
+                c.drawText("웨이브 ${r.wave} · 보스 피해 ${Leaderboard.formatDamage(r.bossDamage)}", viewRect.centerX(), viewRect.centerY() - dp(24f), text)
+                text.typeface = Typeface.DEFAULT_BOLD
+                text.color = GOLD
+                c.drawText(lastRank?.let { "랭킹 ${it}위!" } ?: "10위 밖 기록", viewRect.centerX(), viewRect.centerY() - dp(2f), text)
+                text.typeface = Typeface.DEFAULT
+            }
+            val bw = min(dp(130f), (viewRect.width() - dp(32f)) / 2f)
+            val top = viewRect.centerY() + dp(14f)
+            button(c, RectF(viewRect.centerX() - bw - dp(4f), top, viewRect.centerX() - dp(4f), top + dp(44f)), "다시 하기", color = BTN_GREEN) { startGame() }
+            button(c, RectF(viewRect.centerX() + dp(4f), top, viewRect.centerX() + bw + dp(4f), top + dp(44f)), "처음 화면") { goTitle() }
         }
 
         if (showRecipes) drawRecipeWindow(c)
@@ -755,8 +834,7 @@ class GameView(context: Context) : View(context) {
         button(c, RectF(x + bw2 + gap, row2, x + w, row2 + bh), if (armed) "정말 새 게임?" else "새 게임", color = if (armed) BTN_RED else BTN) {
             if (System.currentTimeMillis() < newGameArmedUntil) {
                 newGameArmedUntil = 0L
-                game.newGame()
-                scrollY = 0f
+                goTitle()
             } else newGameArmedUntil = System.currentTimeMillis() + 3000L
         }
 
@@ -1014,6 +1092,7 @@ class GameView(context: Context) : View(context) {
 
     @SuppressLint("ClickableViewAccessibility")
     override fun onTouchEvent(e: MotionEvent): Boolean {
+        if (screen != Screen.GAME) { onMenuTouch(e); return true }
         scaleDetector.onTouchEvent(e)
         when (e.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
@@ -1066,6 +1145,352 @@ class GameView(context: Context) : View(context) {
             sx += e.getX(i); sy += e.getY(i); n++
         }
         if (n > 0) { lastX = sx / n; lastY = sy / n }
+    }
+
+    // =================================================================== 시작 화면 / 기록
+
+    private fun startGame() {
+        game.newGame()
+        scrollY = 0f
+        showRecipes = false
+        lastRecord = null
+        lastRank = null
+        screen = Screen.GAME
+    }
+
+    private fun goTitle() {
+        showRecipes = false
+        screen = Screen.TITLE
+    }
+
+    private fun drawTitle(c: Canvas) {
+        val w = width.toFloat()
+        val h = height.toFloat()
+        val t = menuTime
+
+        // 배경
+        if (titleBg == null || titleBgW != width || titleBgH != height) {
+            titleBgW = width
+            titleBgH = height
+            titleBg = LinearGradient(0f, 0f, w, h, intArrayOf(0xFF1B1538.toInt(), 0xFF11142A.toInt(), 0xFF0A0D18.toInt()), floatArrayOf(0f, 0.5f, 1f), Shader.TileMode.CLAMP)
+        }
+        titlePaint.shader = titleBg
+        c.drawRect(0f, 0f, w, h, titlePaint)
+        titlePaint.shader = null
+        drawTitleMaze(c, w, h, t)
+
+        // 주변에 떠 있는 작은 보석
+        for (i in TITLE_GEMS.indices) {
+            val m = TITLE_GEMS[i]
+            val by = kotlin.math.sin(t * 0.9f + i * 1.3f) * dp(5f)
+            drawGemShape(c, m[0] * w, m[1] * h + by, dp(11f), TITLE_GEM_COLORS[i], 120)
+        }
+
+        val l = safeL + dp(16f)
+        val r = w - safeR - dp(16f)
+        val areaT = safeT + dp(8f)
+        val areaB = h - safeB - dp(8f)
+        val cy = (areaT + areaB) / 2f
+        val cw = min(r - l, dp(660f))
+        val x0 = (l + r - cw) / 2f
+
+        // 왼쪽: 빛나는 큰 보석
+        val gemCx = x0 + cw * 0.25f
+        val g = min(cw * 0.19f, (areaB - areaT) * 0.3f)
+        val bob = kotlin.math.sin(t * 1.5f) * dp(5f)
+        val gemCy = cy + bob
+        val pulse = 1f + kotlin.math.sin(t * 1.8f) * 0.05f
+
+        c.save()
+        c.translate(gemCx, gemCy)
+        c.rotate(t * 8f)
+        titlePaint.color = 0x09FFFFFF
+        for (i in 0 until 8) {
+            tmpPath.reset()
+            tmpPath.moveTo(0f, 0f)
+            tmpPath.lineTo(-g * 0.2f, -g * 2.1f)
+            tmpPath.lineTo(g * 0.2f, -g * 2.1f)
+            tmpPath.close()
+            c.drawPath(tmpPath, titlePaint)
+            c.rotate(45f)
+        }
+        c.restore()
+
+        c.save()
+        c.translate(gemCx, gemCy)
+        c.scale(g * 2.1f * pulse, g * 2.1f * pulse)
+        titlePaint.color = Color.WHITE
+        titlePaint.shader = titleGlow
+        c.drawCircle(0f, 0f, 1f, titlePaint)
+        titlePaint.shader = null
+        c.restore()
+
+        drawGemShape(c, gemCx, gemCy - g * 0.75f, g, 0xFFA866F2.toInt(), 255)
+        drawSparkle(c, gemCx + g * 0.95f, gemCy - g * 0.95f, g * 0.26f, t * 2.2f)
+        drawSparkle(c, gemCx - g * 1.15f, gemCy - g * 0.2f, g * 0.15f, t * 2.2f + 2f)
+        drawSparkle(c, gemCx + g * 0.45f, gemCy + g * 0.95f, g * 0.13f, t * 2.2f + 4f)
+
+        // 오른쪽: 제목과 버튼
+        val colX = x0 + cw * 0.52f
+        val colW = cw * 0.48f
+        val bh = dp(46f)
+        titleText.typeface = Typeface.DEFAULT_BOLD
+        titleText.textAlign = Paint.Align.LEFT
+        titleText.textSize = dp(32f)
+        val tw = titleText.measureText(TITLE)
+        if (tw > colW) titleText.textSize *= colW / tw
+        val titleH = titleText.textSize * 1.25f
+        val total = titleH + dp(22f) + dp(12f) + dp(30f) + dp(14f) + bh * 2 + dp(10f)
+        var y = cy - total / 2f
+
+        val base = y + titleText.textSize
+        if (titleTextShader == null || titleTextY != base) {
+            titleTextY = base
+            titleTextShader = LinearGradient(0f, y, 0f, base + dp(4f), 0xFFFFF3C4.toInt(), 0xFFFFB938.toInt(), Shader.TileMode.CLAMP)
+        }
+        titleText.shader = titleTextShader
+        titleText.setShadowLayer(dp(10f), 0f, dp(2f), 0xCC6A2FD0.toInt())
+        c.drawText(TITLE, colX, base, titleText)
+        titleText.shader = null
+        titleText.clearShadowLayer()
+        y += titleH
+
+        text.textAlign = Paint.Align.LEFT
+        text.typeface = Typeface.DEFAULT
+        text.textSize = dp(13.5f)
+        text.color = 0xFFC9C2E6.toInt()
+        c.drawText("미로를 짓고, 합성하고, 막아내라", colX, y + dp(15f), text)
+        y += dp(22f) + dp(12f)
+
+        // 최고 기록
+        val best = records.firstOrNull()
+        val bestText = if (best == null) "첫 기록에 도전하세요"
+        else "최고 기록 · ${if (best.cleared) "클리어" else "웨이브 ${best.wave}"} · 보스 피해 ${Leaderboard.formatDamage(best.bossDamage)}"
+        titlePaint.color = 0xE0231F42.toInt()
+        tmpRect.set(colX, y, colX + colW, y + dp(30f))
+        c.drawRoundRect(tmpRect, dp(15f), dp(15f), titlePaint)
+        text.textSize = dp(12f)
+        text.typeface = Typeface.DEFAULT_BOLD
+        val maxText = colW - dp(24f)
+        val bw = text.measureText(bestText)
+        if (bw > maxText) text.textSize *= maxText / bw
+        text.color = GOLD
+        c.drawText(bestText, colX + dp(12f), tmpRect.centerY() - (text.descent() + text.ascent()) / 2f, text)
+        text.typeface = Typeface.DEFAULT
+        y += dp(30f) + dp(14f)
+
+        menuButton(c, RectF(colX, y, colX + colW, y + bh), "▶  게임 시작", 0xFF43B873.toInt(), 0xFF23774A.toInt()) { startGame() }
+        y += bh + dp(10f)
+        menuButton(c, RectF(colX, y, colX + colW, y + bh), "★  기록 TOP ${Leaderboard.SIZE}", 0xFF4A4F8C.toInt(), 0xFF2D3060.toInt()) {
+            recordsScroll = 0f
+            screen = Screen.RECORDS
+        }
+    }
+
+    /** 배경의 희미한 격자와, 적이 지나가는 듯 흐르는 미로 경로 */
+    private fun drawTitleMaze(c: Canvas, w: Float, h: Float, t: Float) {
+        val cell = dp(36f)
+        titlePaint.style = Paint.Style.STROKE
+        titlePaint.strokeWidth = dp(1f)
+        titlePaint.color = 0x0FFFFFFF
+        var x = cell
+        while (x < w) { c.drawLine(x, 0f, x, h, titlePaint); x += cell }
+        var y = cell
+        while (y < h) { c.drawLine(0f, y, w, y, titlePaint); y += cell }
+
+        fun snap(v: Float) = kotlin.math.round(v / cell) * cell
+        tmpPath.reset()
+        tmpPath.moveTo(snap(TITLE_ROUTE[0] * w), snap(TITLE_ROUTE[1] * h))
+        for (i in 2 until TITLE_ROUTE.size step 2) tmpPath.lineTo(snap(TITLE_ROUTE[i] * w), snap(TITLE_ROUTE[i + 1] * h))
+        titlePaint.strokeWidth = dp(2f)
+        titlePaint.color = 0x38FFD866
+        titlePaint.pathEffect = DashPathEffect(floatArrayOf(dp(9f), dp(7f)), -t * dp(16f))
+        c.drawPath(tmpPath, titlePaint)
+        titlePaint.pathEffect = null
+        titlePaint.style = Paint.Style.FILL
+    }
+
+    /** 앱 아이콘과 같은 비율의 보석. (cx, top)이 윗면 중앙, g는 절반 너비 */
+    private fun drawGemShape(c: Canvas, cx: Float, top: Float, g: Float, color: Int, alpha: Int) {
+        val mid = top + g * 0.43f
+        val bot = top + g * 1.5f
+        fun facet(col: Int, vararg p: Float) {
+            tmpPath.reset()
+            tmpPath.moveTo(cx + p[0] * g, p[1])
+            for (i in 2 until p.size step 2) tmpPath.lineTo(cx + p[i] * g, p[i + 1])
+            tmpPath.close()
+            titlePaint.color = col
+            titlePaint.alpha = alpha
+            c.drawPath(tmpPath, titlePaint)
+        }
+        facet(blend(color, Color.WHITE, 0.3f), -0.57f, top, -0.29f, mid, -1f, mid)
+        facet(blend(color, Color.WHITE, 0.7f), -0.57f, top, 0.57f, top, 0.29f, mid, -0.29f, mid)
+        facet(color, 0.57f, top, 1f, mid, 0.29f, mid)
+        facet(blend(color, Color.BLACK, 0.08f), -1f, mid, -0.29f, mid, 0f, bot)
+        facet(blend(color, Color.BLACK, 0.27f), -0.29f, mid, 0.29f, mid, 0f, bot)
+        facet(blend(color, Color.BLACK, 0.47f), 0.29f, mid, 1f, mid, 0f, bot)
+    }
+
+    /** 커졌다 작아지며 반짝이는 별 */
+    private fun drawSparkle(c: Canvas, x: Float, y: Float, r: Float, phase: Float) {
+        val s = (kotlin.math.sin(phase) + 1f) / 2f
+        val size = r * (0.35f + 0.65f * s)
+        val k = size * 0.18f
+        tmpPath.reset()
+        tmpPath.moveTo(x, y - size)
+        tmpPath.lineTo(x + k, y - k)
+        tmpPath.lineTo(x + size, y)
+        tmpPath.lineTo(x + k, y + k)
+        tmpPath.lineTo(x, y + size)
+        tmpPath.lineTo(x - k, y + k)
+        tmpPath.lineTo(x - size, y)
+        tmpPath.lineTo(x - k, y - k)
+        tmpPath.close()
+        titlePaint.color = Color.WHITE
+        titlePaint.alpha = (110 + 145 * s).toInt()
+        c.drawPath(tmpPath, titlePaint)
+    }
+
+    private fun menuButton(c: Canvas, r: RectF, label: String, top: Int, bottom: Int, action: () -> Unit) {
+        val pressed = menuDown && !dragging && r.contains(downX, downY)
+        val a = if (pressed) blend(top, Color.BLACK, 0.25f) else top
+        val b = if (pressed) blend(bottom, Color.BLACK, 0.25f) else bottom
+        val radius = dp(14f)
+        titlePaint.color = Color.WHITE
+        titlePaint.shader = LinearGradient(0f, r.top, 0f, r.bottom, a, b, Shader.TileMode.CLAMP)
+        c.drawRoundRect(r, radius, radius, titlePaint)
+        titlePaint.shader = null
+        stroke.strokeWidth = dp(1f)
+        stroke.color = 0x55FFFFFF
+        c.drawRoundRect(r, radius, radius, stroke)
+        text.textAlign = Paint.Align.CENTER
+        text.typeface = Typeface.DEFAULT_BOLD
+        text.textSize = dp(16f)
+        text.color = Color.WHITE
+        c.drawText(label, r.centerX(), r.centerY() - (text.descent() + text.ascent()) / 2f, text)
+        text.typeface = Typeface.DEFAULT
+        buttons.add(Button(RectF(r), true, action))
+    }
+
+    private fun drawRecords(c: Canvas) {
+        val l = safeL + dp(16f)
+        val r = width - safeR - dp(16f)
+        var y = safeT + dp(10f)
+
+        text.textAlign = Paint.Align.LEFT
+        text.typeface = Typeface.DEFAULT_BOLD
+        text.textSize = dp(20f)
+        text.color = GOLD
+        c.drawText("기록 TOP ${Leaderboard.SIZE}", l, y + dp(24f), text)
+        text.typeface = Typeface.DEFAULT
+        button(c, RectF(r - dp(92f), y, r, y + dp(36f)), "돌아가기") { screen = Screen.TITLE }
+        button(c, RectF(r - dp(212f), y, r - dp(100f), y + dp(36f)), "1위 공유하기", records.isNotEmpty(), BTN_GREEN) { shareBest() }
+        y += dp(42f)
+        text.textAlign = Paint.Align.LEFT
+        text.textSize = dp(11.5f)
+        text.color = TEXT_DIM
+        c.drawText("순위 기준: 보스 피해 > 보스 시간 > 총 시간 > 남은 생명 > 남은 골드", l, y + dp(10f), text)
+        y += dp(20f)
+
+        val heads = listOf("순위", "보스 피해", "보스 시간", "총 시간", "생명", "골드", "도달")
+        val weights = floatArrayOf(0.7f, 1.4f, 1.1f, 1.1f, 0.7f, 1f, 1.2f)
+        val unit = (r - l) / weights.sum()
+        fun rowCells(cells: List<String>, rowY: Float, h: Float, color: Int, bold: Boolean) {
+            text.textAlign = Paint.Align.CENTER
+            text.typeface = if (bold) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
+            var x = l
+            for (i in cells.indices) {
+                val w = weights[i] * unit
+                text.textSize = dp(13f)
+                val tw = text.measureText(cells[i])
+                if (tw > w - dp(4f)) text.textSize *= (w - dp(4f)) / tw
+                text.color = color
+                c.drawText(cells[i], x + w / 2, rowY + h / 2 - (text.descent() + text.ascent()) / 2, text)
+                x += w
+            }
+            text.typeface = Typeface.DEFAULT
+        }
+        val headH = dp(26f)
+        fill.color = BTN
+        c.drawRoundRect(l, y, r, y + headH, dp(6f), dp(6f), fill)
+        rowCells(heads, y, headH, Color.WHITE, true)
+        y += headH + dp(2f)
+
+        val bottom = height - safeB - dp(8f)
+        if (records.isEmpty()) {
+            text.textAlign = Paint.Align.CENTER
+            text.textSize = dp(15f)
+            text.color = TEXT_DIM
+            c.drawText("아직 기록이 없습니다. 첫 기록을 세워 보세요!", (l + r) / 2f, (y + bottom) / 2f, text)
+            return
+        }
+        val rowH = dp(32f)
+        val maxScroll = max(0f, records.size * rowH - (bottom - y))
+        recordsScroll = recordsScroll.coerceIn(0f, maxScroll)
+        c.save()
+        c.clipRect(l, y, r, bottom)
+        records.forEachIndexed { i, rec ->
+            val ry = y + i * rowH - recordsScroll
+            if (rec === lastRecord) {
+                fill.color = 0x559A7420
+                c.drawRoundRect(l, ry + dp(1f), r, ry + rowH - dp(1f), dp(6f), dp(6f), fill)
+            } else if (i % 2 == 0) {
+                fill.color = 0xFF171B24.toInt()
+                c.drawRect(l, ry, r, ry + rowH, fill)
+            }
+            rowCells(
+                listOf(
+                    "${i + 1}", Leaderboard.formatDamage(rec.bossDamage), Leaderboard.formatTime(rec.bossTime),
+                    Leaderboard.formatTime(rec.totalTime), "${rec.lives}", "${rec.gold}G",
+                    if (rec.cleared) "클리어" else "웨이브 ${rec.wave}",
+                ),
+                ry, rowH, if (i == 0 || rec.cleared) GOLD else Color.WHITE, i == 0,
+            )
+        }
+        c.restore()
+        if (maxScroll > 0f) {
+            val trackH = bottom - y
+            val thumbH = max(dp(24f), trackH * trackH / (records.size * rowH))
+            val thumbY = y + (trackH - thumbH) * (recordsScroll / maxScroll)
+            fill.color = 0x55FFFFFF
+            c.drawRoundRect(r + dp(3f), thumbY, r + dp(6f), thumbY + thumbH, dp(2f), dp(2f), fill)
+        }
+    }
+
+    /** 1위 기록을 Play 스토어 다운로드 링크와 함께 공유 */
+    private fun shareBest() {
+        val best = records.firstOrNull() ?: return
+        val send = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_SUBJECT, "보석 타워 디펜스 1위 기록")
+            putExtra(Intent.EXTRA_TEXT, Leaderboard.shareText(best, DOWNLOAD_URL))
+        }
+        try {
+            context.startActivity(Intent.createChooser(send, "1위 기록 공유"))
+        } catch (_: ActivityNotFoundException) {
+            Toast.makeText(context, "공유할 수 있는 앱이 없습니다", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun onMenuTouch(e: MotionEvent) {
+        when (e.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                downX = e.x
+                downY = e.y
+                downRecordsScroll = recordsScroll
+                menuDown = true
+                dragging = false
+            }
+            MotionEvent.ACTION_MOVE -> {
+                if (!dragging && (abs(e.y - downY) > touchSlop || abs(e.x - downX) > touchSlop)) dragging = true
+                if (dragging && screen == Screen.RECORDS) recordsScroll = downRecordsScroll - (e.y - downY)
+            }
+            MotionEvent.ACTION_CANCEL -> menuDown = false
+            MotionEvent.ACTION_UP -> {
+                menuDown = false
+                if (!dragging) buttons.lastOrNull { it.rect.contains(e.x, e.y) && it.enabled }?.action?.invoke()
+            }
+        }
     }
 
     private fun handleTap(x: Float, y: Float) {

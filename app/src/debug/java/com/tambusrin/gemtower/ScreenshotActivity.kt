@@ -8,6 +8,7 @@ import android.view.WindowManager
 import com.tambusrin.gemtower.game.Cell
 import com.tambusrin.gemtower.game.CellType
 import com.tambusrin.gemtower.game.Game
+import com.tambusrin.gemtower.game.GameRecord
 import com.tambusrin.gemtower.game.GemQuality
 import com.tambusrin.gemtower.game.GemQuality.CHIPPED
 import com.tambusrin.gemtower.game.GemQuality.FLAWED
@@ -52,6 +53,7 @@ class ScreenshotActivity : Activity() {
         }
         view = GameView(this)
         view.debugStartZoomFit()
+        view.debugSkipTitle(keepRecords = intent.getStringExtra("scene") == "finale")
         setContentView(view)
         setup(intent.getStringExtra("scene") ?: "maze")
     }
@@ -60,6 +62,18 @@ class ScreenshotActivity : Activity() {
         val g = view.game
         val rng = Random(2026)
         when (scene) {
+            "finale" -> {
+                // 기록 저장 확인용: 탑 없이 최종 보스를 흘려보내 게임 오버
+                g.debugSetup(wave = Game.MAX_WAVE, gold = 77, chanceLevel = 0, lives = 20)
+                view.debugSetSpeed(3)
+                g.debugStartWave()
+            }
+            "records" -> view.debugShowRecords(
+                List(10) { i ->
+                    GameRecord.of(8.4e9 / (1 shl i), 96.0 + i * 7, 1420.0 - i * 60, 18 - i, 240 - i * 13, 62 - i * 4, false)
+                },
+                highlight = 2,
+            )
             "maze" -> {
                 g.debugSetup(wave = 17, gold = 85, chanceLevel = 6, lives = 18)
                 buildMaze(g, 70, lateGems, rng)
