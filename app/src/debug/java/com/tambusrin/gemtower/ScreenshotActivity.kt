@@ -26,7 +26,7 @@ import kotlin.random.Random
 
 /**
  * 스토어 스크린샷 촬영용 화면 (debug 빌드에만 포함됨).
- * adb shell am start -n com.tambusrin.gemtower/.ScreenshotActivity --es scene maze|choose|recipes|boss
+ * adb shell am start -n com.tambusrin.gemtower/.ScreenshotActivity --es scene title|maze|choose|recipes|boss|records
  */
 class ScreenshotActivity : Activity() {
     private lateinit var view: GameView
@@ -68,12 +68,8 @@ class ScreenshotActivity : Activity() {
                 view.debugSetSpeed(3)
                 g.debugStartWave()
             }
-            "records" -> view.debugShowRecords(
-                List(10) { i ->
-                    GameRecord.of(8.4e9 / (1 shl i), 96.0 + i * 7, 1420.0 - i * 60, 18 - i, 240 - i * 13, 62 - i * 4, false)
-                },
-                highlight = 2,
-            )
+            "title" -> view.debugShowTitle(sampleRecords())
+            "records" -> view.debugShowRecords(sampleRecords().take(9), highlight = 2)
             "maze" -> {
                 g.debugSetup(wave = 17, gold = 85, chanceLevel = 6, lives = 18)
                 buildMaze(g, 70, lateGems, rng)
@@ -137,6 +133,10 @@ class ScreenshotActivity : Activity() {
                 if (scene == "recipes") view.debugShowRecipes()
             }
         }
+    }
+
+    private fun sampleRecords() = List(10) { i ->
+        GameRecord.of(8.4e9 / (1 shl i), 96.0 + i * 7, 1420.0 - i * 60, 18 - i, 240 - i * 13, 62 - i * 4, false)
     }
 
     /** 경로를 가장 길게 만드는 칸 n개 (동점이면 무작위) */

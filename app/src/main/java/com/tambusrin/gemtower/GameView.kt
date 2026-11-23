@@ -219,6 +219,12 @@ class GameView(context: Context) : View(context) {
         if (!keepRecords) game.onFinished = null
     }
 
+    /** 스크린샷용: 예시 기록이 있는 시작 화면 */
+    internal fun debugShowTitle(list: List<GameRecord>) {
+        records = list
+        screen = Screen.TITLE
+    }
+
     /** 스크린샷용: 저장하지 않고 예시 기록을 보여 줌 */
     internal fun debugShowRecords(list: List<GameRecord>, highlight: Int) {
         records = list
@@ -273,6 +279,11 @@ class GameView(context: Context) : View(context) {
         computeLayout()
     }
 
+    /** 오른쪽 버튼 열이 차지하는 폭. 보드는 이 영역을 피해서 배치됨 */
+    private val controlsW get() = dp(if (panelHidden) 128f else 50f)
+    private val boardRight get() = max(viewRect.left + dp(40f), viewRect.right - controlsW)
+    private val boardCenterX get() = (viewRect.left + boardRight) / 2f
+
     private fun computeLayout() {
         if (width == 0 || height == 0) return
         val pad = dp(8f)
@@ -292,16 +303,16 @@ class GameView(context: Context) : View(context) {
         }
 
         // 최소 배율 = 보드 전체가 창에 들어옴, 기본 배율 = 칸이 손가락으로 누르기 좋은 크기
-        minCs = min(viewRect.width() / (Game.W + 0.6f), viewRect.height() / (Game.H + 0.6f))
+        minCs = min((boardRight - viewRect.left) / (Game.W + 0.6f), viewRect.height() / (Game.H + 0.6f))
         maxCs = max(minCs, dp(72f))
         if (!zoomInit) {
             cs = if (startZoomFit) minCs else dp(DEFAULT_CELL_DP).coerceIn(minCs, maxCs)
-            ox = viewRect.centerX() - cs * Game.W / 2f
+            ox = boardCenterX - cs * Game.W / 2f
             oy = viewRect.centerY() - cs * Game.H / 2f
             zoomInit = true
         } else {
             val n = cs.coerceIn(minCs, maxCs)
-            if (n != cs) zoomAt(viewRect.centerX(), viewRect.centerY(), n / cs)
+            if (n != cs) zoomAt(boardCenterX, viewRect.centerY(), n / cs)
         }
         clampPan()
     }
@@ -311,8 +322,8 @@ class GameView(context: Context) : View(context) {
         val m = cs * 0.3f
         val bw = cs * Game.W
         val bh = cs * Game.H
-        ox = if (bw + 2 * m <= viewRect.width()) viewRect.centerX() - bw / 2f
-        else ox.coerceIn(viewRect.right - m - bw, viewRect.left + m)
+        ox = if (bw + 2 * m <= boardRight - viewRect.left) boardCenterX - bw / 2f
+        else ox.coerceIn(boardRight - m - bw, viewRect.left + m)
         oy = if (bh + 2 * m <= viewRect.height()) viewRect.centerY() - bh / 2f
         else oy.coerceIn(viewRect.bottom - m - bh, viewRect.top + m)
         boardRect.set(ox, oy, ox + bw, oy + bh)
@@ -339,9 +350,9 @@ class GameView(context: Context) : View(context) {
         sideRect.setEmpty()
         if (showRecipes) return
         val gap = dp(6f)
-        val zoomIn = { zoomAt(viewRect.centerX(), viewRect.centerY(), 1.35f) }
-        val zoomOut = { zoomAt(viewRect.centerX(), viewRect.centerY(), 1f / 1.35f) }
-        val zoomFit = { zoomAt(viewRect.centerX(), viewRect.centerY(), minCs / cs) }
+        val zoomIn = { zoomAt(boardCenterX, viewRect.centerY(), 1.35f) }
+        val zoomOut = { zoomAt(boardCenterX, viewRect.centerY(), 1f / 1.35f) }
+        val zoomFit = { zoomAt(boardCenterX, viewRect.centerY(), minCs / cs) }
 
         if (!panelHidden) {
             val s = dp(38f)
