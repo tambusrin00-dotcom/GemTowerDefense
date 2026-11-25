@@ -68,6 +68,18 @@ class ScreenshotActivity : Activity() {
                 view.debugSetSpeed(3)
                 g.debugStartWave()
             }
+            "gallery" -> {
+                // 보석 그림 확인용: 왼쪽 = 종류 × 등급, 오른쪽 = 조합 보석 전부 (패스 차단 무시)
+                g.debugSetup(wave = 5, gold = 0, chanceLevel = 0)
+                for ((ti, type) in GemType.entries.withIndex()) for ((qi, q) in GemQuality.entries.withIndex()) {
+                    val cell = Cell(1 + qi, 1 + ti * 2)
+                    if (g.cellType(cell) == CellType.EMPTY) g.debugKeptGem(cell, type, q)
+                }
+                for ((i, k) in SpecialKind.entries.withIndex()) {
+                    val cell = Cell(8 + (i % 5) * 2, 1 + (i / 5) * 2)
+                    if (g.cellType(cell) == CellType.EMPTY) g.debugKeptGem(cell, GemType.RUBY, NORMAL, k, i % 6)
+                }
+            }
             "title" -> view.debugShowTitle(sampleRecords())
             "records" -> view.debugShowRecords(sampleRecords().take(9), highlight = 2)
             "maze" -> {

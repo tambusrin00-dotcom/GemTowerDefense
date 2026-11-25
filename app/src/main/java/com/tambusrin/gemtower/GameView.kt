@@ -84,6 +84,8 @@ class GameView(context: Context) : View(context) {
 
     // ---- UI 상태 ----
     private var showRecipes = false
+    /** 부수기 확인 팝업을 띄운 칸 */
+    private var confirmBreak: Cell? = null
     private var recipeScroll = 0f
     private var downRecipeScroll = 0f
     private var downInRecipe = false
@@ -146,6 +148,7 @@ class GameView(context: Context) : View(context) {
     }
     private val tmpRect = RectF()
     private val tmpPath = Path()
+    private val gemArt = GemArt()
     private val routePath = Path()
     private var routeVersion = -1
     private var routeCs = -1f
@@ -462,6 +465,7 @@ class GameView(context: Context) : View(context) {
         drawBoardOverlay(canvas)
         canvas.restore()
         if (!panelHidden) drawPanel(canvas)
+        drawBreakConfirm(canvas)
     }
 
     private fun drawBoard(c: Canvas) {
@@ -613,59 +617,17 @@ class GameView(context: Context) : View(context) {
         val sp = t.special
         if (sp == null) {
             val qi = t.quality.ordinal
-            val r = cs * (0.19f + 0.045f * qi)
             val bob = if (t.kept) 0f else sin(game.time * 3f + t.cell.x) * cs * 0.04f
-            val gy = py - cs * 0.04f + bob
-            tmpPath.reset()
-            tmpPath.moveTo(px, gy - r * 1.25f)
-            tmpPath.lineTo(px + r, gy)
-            tmpPath.lineTo(px, gy + r * 1.25f)
-            tmpPath.lineTo(px - r, gy)
-            tmpPath.close()
-            fill.color = t.stats.color
-            c.drawPath(tmpPath, fill)
-            // 윗면 하이라이트
-            tmpPath.reset()
-            tmpPath.moveTo(px, gy - r * 1.25f)
-            tmpPath.lineTo(px + r * 0.55f, gy - r * 0.3f)
-            tmpPath.lineTo(px - r * 0.55f, gy - r * 0.3f)
-            tmpPath.close()
-            fill.color = blend(t.stats.color, Color.WHITE, 0.5f)
-            c.drawPath(tmpPath, fill)
+            gemArt.drawBasic(c, px, py - cs * 0.05f + bob, cs, t.stats.color, t.quality, game.time + t.cell.x * 0.7f + t.cell.y * 0.3f)
             // 품질 점
             fill.color = GOLD
             val n = qi + 1
-            val gap = cs * 0.13f
+            val gap = cs * 0.11f
             val startX = px - gap * (n - 1) / 2f
-            for (i in 0 until n) c.drawCircle(startX + gap * i, py + cs * 0.33f, cs * 0.045f, fill)
-        } else if (sp.hidden) {
-            // 우라늄: 맥동하는 초록 빛 + 방사능 표시
-            val pulse = sin(game.time * 4f) * 0.5f + 0.5f
-            fill.color = t.stats.color
-            fill.alpha = (50 + pulse * 70).toInt()
-            c.drawCircle(px, py, cs * (0.44f + pulse * 0.06f), fill)
-            fill.alpha = 255
-            fill.color = t.stats.color
-            c.drawCircle(px, py, cs * 0.34f, fill)
-            fill.color = 0xFF1A1F0E.toInt()
-            tmpRect.set(px - cs * 0.28f, py - cs * 0.28f, px + cs * 0.28f, py + cs * 0.28f)
-            for (i in 0 until 3) c.drawArc(tmpRect, -120f + i * 120f + game.time * 30f, 60f, true, fill)
-            fill.color = t.stats.color
-            c.drawCircle(px, py, cs * 0.09f, fill)
-            fill.color = 0xFF1A1F0E.toInt()
-            c.drawCircle(px, py, cs * 0.055f, fill)
+            for (i in 0 until n) c.drawCircle(startX + gap * i, py + cs * 0.35f, cs * 0.035f, fill)
         } else {
-            fill.color = darken(t.stats.color, 0.4f)
-            c.drawCircle(px, py, cs * 0.38f, fill)
-            fill.color = t.stats.color
-            c.drawCircle(px, py, cs * 0.25f, fill)
-            fill.color = Color.WHITE
-            for (i in 0 until 3) {
-                val a = game.time * 2.5f + i * 2.0944f
-                c.drawCircle(px + cos(a) * cs * 0.33f, py + sin(a) * cs * 0.33f, cs * 0.06f, fill)
-            }
-            fill.color = 0xFFFF8C33.toInt()
-            for (i in 0 until t.specialLevel) c.drawCircle(px - cs * 0.3f + i * cs * 0.15f, py + cs * 0.36f, cs * 0.045f, fill)
+            gemArt.drawSpecial(c, px, py - cs * 0.03f, cs, t.stats.color, sp, game.time + t.cell.x * 0.7f + t.cell.y * 0.3f)
+            if (!sp.hidden) gemArt.drawUpgradeStar(c, px + cs * 0.27f, py + cs * 0.27f, cs * 0.15f, t.specialLevel, GemDB.MAX_SPECIAL_LEVEL, game.time)
         }
 
         if (!t.kept) {
@@ -767,6 +729,38 @@ class GameView(context: Context) : View(context) {
         }
 
         if (showRecipes) drawRecipeWindow(c)
+    }
+
+    /** 보석 부수기 확인 팝업. 이 팝업이 떠 있는 동안에는 팝업 버튼만 눌림. */
+    private fun drawBreakConfirm(c: Canvas) {
+        val cell = confirmBreak ?: return
+        val t = game.towerAt(cell)
+        if (t == null || !game.canBreakGem(cell)) { confirmBreak = null; return }
+        buttons.clear()
+        fill.color = 0xAA000000.toInt()
+        c.drawRect(0f, 0f, width.toFloat(), height.toFloat(), fill)
+        val w = min(dp(320f), width - dp(32f))
+        val inner = w - dp(36f)
+        val body = "「${t.stats.name}」을(를) 부술까요?\n부순 보석은 되돌릴 수 없습니다. (비용 없음)"
+        val textH = wrappedLayout(body, inner, dp(14f), false).height
+        val h = dp(18f) + dp(26f) + textH + dp(18f) + dp(44f) + dp(18f)
+        val l = (width - w) / 2f
+        val top = (height - h) / 2f
+        tmpRect.set(l, top, l + w, top + h)
+        fill.color = 0xFF1E222B.toInt()
+        c.drawRoundRect(tmpRect, dp(14f), dp(14f), fill)
+        stroke.color = 0xFF555B6A.toInt()
+        stroke.strokeWidth = dp(1.5f)
+        c.drawRoundRect(tmpRect, dp(14f), dp(14f), stroke)
+        var y = top + dp(18f)
+        y += drawWrapped(c, "보석 부수기", l + dp(18f), y, inner, dp(18f), Color.WHITE, bold = true) + dp(8f)
+        y += drawWrapped(c, body, l + dp(18f), y, inner, dp(14f), TEXT_DIM) + dp(18f)
+        val bw = (inner - dp(10f)) / 2f
+        button(c, RectF(l + dp(18f), y, l + dp(18f) + bw, y + dp(44f)), "취소") { confirmBreak = null }
+        button(c, RectF(l + dp(28f) + bw, y, l + dp(28f) + bw * 2, y + dp(44f)), "부수기", color = BTN_RED) {
+            game.breakGem(cell)
+            confirmBreak = null
+        }
     }
 
     private fun drawRecipeWindow(c: Canvas) {
@@ -931,6 +925,16 @@ class GameView(context: Context) : View(context) {
             y += drawWrapped(c, "적의 길을 막는 장애물입니다.", x, y, w, dp(12f), TEXT_DIM) + dp(6f)
         } else {
             y += drawWrapped(c, t.stats.name, x, y, w, dp(15f), t.stats.color, bold = true) + dp(6f)
+            val sp = t.special
+            if (sp != null && !sp.hidden) {
+                val max = GemDB.MAX_SPECIAL_LEVEL
+                val r = dp(13f)
+                gemArt.drawUpgradeStar(c, x + r + dp(2f), y + r, r, t.specialLevel, max, game.time)
+                val label = if (t.specialLevel >= max) "최대 강화 ★" else "강화 ${t.specialLevel}/$max"
+                drawWrapped(c, label, x + r * 2 + dp(10f), y + r - dp(9f), w - r * 2 - dp(10f), dp(13f),
+                    if (t.specialLevel >= max) GOLD else TEXT_DIM, bold = true)
+                y += r * 2 + dp(8f)
+            }
         }
         for (a in selectionActs(sel)) {
             button(c, RectF(x, y, x + w, y + bh), a.label, a.enabled, a.color, scrolled = true, action = a.action)
@@ -981,6 +985,9 @@ class GameView(context: Context) : View(context) {
                 if (game.findRecipeParts(t, r) == null) continue
                 out += Act("특수 합성 → ${r.result.label}", r.result.label, true, BTN_PURPLE) { game.makeSpecial(t, r) }
             }
+        }
+        if (game.canBreakGem(sel)) {
+            out += Act("보석 부수기 (무료)", "부수기", true, BTN_RED) { confirmBreak = sel }
         }
         if (game.isBuildState && t.special != null) {
             out += when {
@@ -1125,6 +1132,17 @@ class GameView(context: Context) : View(context) {
     @SuppressLint("ClickableViewAccessibility")
     override fun onTouchEvent(e: MotionEvent): Boolean {
         if (screen != Screen.GAME) { onMenuTouch(e); return true }
+        if (confirmBreak != null) {
+            when (e.actionMasked) {
+                MotionEvent.ACTION_DOWN -> { downX = e.x; downY = e.y; dragging = false }
+                MotionEvent.ACTION_MOVE -> if (abs(e.y - downY) > touchSlop || abs(e.x - downX) > touchSlop) dragging = true
+                MotionEvent.ACTION_UP -> if (!dragging) {
+                    val b = buttons.lastOrNull { it.rect.contains(e.x, e.y) }
+                    if (b != null) { if (b.enabled) b.action() } else confirmBreak = null
+                }
+            }
+            return true
+        }
         scaleDetector.onTouchEvent(e)
         when (e.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
@@ -1185,6 +1203,7 @@ class GameView(context: Context) : View(context) {
         game.newGame()
         scrollY = 0f
         showRecipes = false
+        confirmBreak = null
         lastRecord = null
         lastRank = null
         screen = Screen.GAME
@@ -1192,6 +1211,7 @@ class GameView(context: Context) : View(context) {
 
     private fun goTitle() {
         showRecipes = false
+        confirmBreak = null
         screen = Screen.TITLE
     }
 

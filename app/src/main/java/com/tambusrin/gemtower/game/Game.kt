@@ -477,6 +477,24 @@ class Game(private val rng: Random = Random.Default) {
         }
     }
 
+
+    /** 남겨 둔(배치된) 보석은 건설 단계에서 무료로 부술 수 있음. 이번 라운드 보석은 선택 단계가 끝나야 함. */
+    fun canBreakGem(c: Cell): Boolean {
+        if (!isBuildState || !inBounds(c)) return false
+        val t = towers[c.x][c.y] ?: return false
+        return t.kept && t !in roundGems
+    }
+
+    fun breakGem(c: Cell): Boolean {
+        if (!canBreakGem(c)) return false
+        if (movingFrom != null) cancelMove()
+        towers[c.x][c.y] = null
+        cells[c.x][c.y] = CellType.EMPTY
+        if (selected == c) selected = null
+        recalcPath()
+        refreshHiddenGems()
+        return true
+    }
     fun removeRock(c: Cell) {
         if (!isBuildState || cells[c.x][c.y] != CellType.ROCK || gold < ROCK_REMOVE_COST) return
         gold -= ROCK_REMOVE_COST
