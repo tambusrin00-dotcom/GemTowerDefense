@@ -8,13 +8,16 @@ import android.view.WindowManager
 
 class MainActivity : Activity() {
     private lateinit var gameView: GameView
+    private lateinit var bgm: BgmPlayer
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.attributes = window.attributes.apply {
             layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
         }
+        bgm = BgmPlayer(this)
         gameView = GameView(this)
+        gameView.bgm = bgm
         setContentView(gameView)
     }
 
@@ -22,9 +25,11 @@ class MainActivity : Activity() {
         super.onResume()
         hideSystemUi()
         gameView.resume()
+        bgm.onResume()
     }
 
     override fun onPause() {
+        bgm.onPause()
         gameView.pause()
         super.onPause()
     }

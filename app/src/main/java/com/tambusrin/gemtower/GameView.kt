@@ -30,6 +30,8 @@ import android.view.WindowInsets
 import com.tambusrin.gemtower.game.Beam
 import com.tambusrin.gemtower.game.Cell
 import com.tambusrin.gemtower.game.CellType
+import com.tambusrin.gemtower.game.DamageText
+import com.tambusrin.gemtower.game.formatShort
 import com.tambusrin.gemtower.game.Game
 import com.tambusrin.gemtower.game.GameRecord
 import com.tambusrin.gemtower.game.GameState
@@ -99,6 +101,13 @@ class GameView(context: Context) : View(context) {
     private var screen = Screen.TITLE
     private val recordStore = RecordStore(context)
     private var records = recordStore.load()
+    private val saveStore = SaveStore(context)
+    /** 이어 하기 저장본 (없으면 null). 시작 화면의 "이어 하기" 버튼에 씀 */
+    private var savedGame: String? = saveStore.load()
+    /** 스크린샷용 실행에서는 저장하지 않음 */
+    private var saveEnabled = true
+    private var lastSavedState: GameState? = null
+    private var lastSavedWave = 0
     private var lastRecord: GameRecord? = null   // 방금 끝난 판
     private var lastRank: Int? = null
     private var recordsScroll = 0f
@@ -141,6 +150,14 @@ class GameView(context: Context) : View(context) {
     private val fill = Paint(Paint.ANTI_ALIAS_FLAG)
     private val stroke = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
     private val text = TextPaint(Paint.ANTI_ALIAS_FLAG)
+    private val dmgText = Paint(Paint.ANTI_ALIAS_FLAG).apply { typeface = Typeface.DEFAULT_BOLD }
+    private val dmgOutline = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        typeface = Typeface.DEFAULT_BOLD
+        style = Paint.Style.STROKE
+        strokeJoin = Paint.Join.ROUND
+        color = 0xFF1A1020.toInt()
+        textAlign = Paint.Align.CENTER
+    }
     private val pathPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
         strokeCap = Paint.Cap.ROUND
@@ -157,6 +174,7 @@ class GameView(context: Context) : View(context) {
     private val layoutCache = HashMap<String, StaticLayout>()
 
     private companion object {
+        val SAVED_WAVE = Regex("(?m)^wave=([0-9]+)$")
         const val BG = 0xFF0E1117.toInt()
         const val BOARD = 0xFF1C2028.toInt()
         const val TILE_A = 0xFF4F5E4A.toInt()
@@ -202,6 +220,7 @@ class GameView(context: Context) : View(context) {
             lastRecord = r
             lastRank = rank
             if (rank != null) recordStore.save(list)
+            clearSave()
         }
     }
 
@@ -220,6 +239,7 @@ class GameView(context: Context) : View(context) {
     internal fun debugSkipTitle(keepRecords: Boolean = false) {
         screen = Screen.GAME
         if (!keepRecords) game.onFinished = null
+        saveEnabled = false
     }
 
     /** 스크린샷용: 예시 기록이 있는 시작 화면 */
@@ -249,6 +269,7 @@ class GameView(context: Context) : View(context) {
     }
 
     fun pause() {
+        saveProgress()
         running = false
         Choreographer.getInstance().removeFrameCallback(frameCallback)
     }
@@ -261,6 +282,7 @@ class GameView(context: Context) : View(context) {
             if (screen == Screen.GAME) {
                 game.update(dt * speed)
                 game.tickUi(dt)
+                autoSave()
             }
             if (flashTime > 0f) flashTime -= dt
         }
@@ -427,8 +449,8 @@ class GameView(context: Context) : View(context) {
     private fun passAct(): Act? {
         if (!game.canPass) return null
         val armed = System.currentTimeMillis() < passArmedUntil
-        val label = if (armed) "정말 패스? (바로 전투 시작)" else "배치 패스 (공격력 +0.01%)"
-        return Act(label, if (armed) "정말 패스?" else "패스 +0.01%", true, if (armed) BTN_RED else BTN_TEAL) {
+        val label = if (armed) "정말 패스? (바로 전투 시작)" else "배치 패스 (공격력 +1%)"
+        return Act(label, if (armed) "정말 패스?" else "패스 +1%", true, if (armed) BTN_RED else BTN_TEAL) {
             if (System.currentTimeMillis() < passArmedUntil) {
                 passArmedUntil = 0L
                 game.passRound()
@@ -592,6 +614,51 @@ class GameView(context: Context) : View(context) {
             fill.color = if (p.crit) Color.WHITE else p.src.stats.color
             c.drawCircle(cx(p.x), cy(p.y), cs * if (p.crit) 0.13f else 0.09f, fill)
         }
+
+        drawDamageTexts(c)
+    }
+
+    /** 피해 숫자: 위로 떠오르며 사라짐. 치명타는 크고 주황색 + "!" 로 강조하고 살짝 튀어오름 */
+    private fun drawDamageTexts(c: Canvas) {
+        val list = game.damageTexts
+        if (list.isEmpty()) return
+        dmgText.textAlign = Paint.Align.CENTER
+        for (t in list) {
+            val f = (t.age / DamageText.DURATION).coerceIn(0f, 1f)
+            val alpha = ((1f - f * f) * 255).toInt()
+            val px = cx(t.x)
+            val py = cy(t.y) - f * cs * 0.8f
+            val label: String
+            if (t.crit) {
+                // 처음 0.15초 동안 크게 튀었다가 제자리 크기로
+                val pop = if (f < 0.2f) 1f + (0.2f - f) * 2.5f else 1f
+                dmgText.textSize = cs * 0.5f * pop
+                dmgText.color = 0xFFFF9A1F.toInt()
+                label = formatShort(t.amount) + "!"
+            } else {
+                dmgText.textSize = cs * 0.32f
+                dmgText.color = Color.WHITE
+                label = formatShort(t.amount)
+            }
+            dmgOutline.textSize = dmgText.textSize
+            dmgOutline.strokeWidth = dmgText.textSize * 0.16f
+            dmgOutline.alpha = alpha
+            dmgText.alpha = alpha
+            c.drawText(label, px, py, dmgOutline)
+            c.drawText(label, px, py, dmgText)
+            if (t.crit && f < 0.5f) {
+                // 작은 "치명타" 꼬리표
+                val tag = "치명타"
+                val ts = dmgText.textSize
+                dmgText.textSize = cs * 0.2f
+                dmgOutline.textSize = dmgText.textSize
+                dmgOutline.strokeWidth = dmgText.textSize * 0.2f
+                dmgText.color = 0xFFFFE066.toInt()
+                dmgText.alpha = alpha
+                c.drawText(tag, px, py - ts * 0.9f, dmgOutline)
+                c.drawText(tag, px, py - ts * 0.9f, dmgText)
+            }
+        }
     }
 
     private fun drawRock(c: Canvas, x: Int, y: Int) {
@@ -716,7 +783,7 @@ class GameView(context: Context) : View(context) {
             lastRecord?.let { r ->
                 text.textSize = dp(14f)
                 text.color = TEXT_DIM
-                c.drawText("웨이브 ${r.wave} · 보스 피해 ${Leaderboard.formatDamage(r.bossDamage)}", viewRect.centerX(), viewRect.centerY() - dp(24f), text)
+                c.drawText(if (r.wave >= Game.MAX_WAVE) "최종 보스 피해 ${Leaderboard.formatDamage(r.bossDamage)}" else "웨이브 ${r.wave} 도달", viewRect.centerX(), viewRect.centerY() - dp(24f), text)
                 text.typeface = Typeface.DEFAULT_BOLD
                 text.color = GOLD
                 c.drawText(lastRank?.let { "랭킹 ${it}위!" } ?: "10위 밖 기록", viewRect.centerX(), viewRect.centerY() - dp(2f), text)
@@ -853,9 +920,13 @@ class GameView(context: Context) : View(context) {
         }
         val bw2 = (w - gap) / 2f
         val row2 = footerTop + bh + gap
-        button(c, RectF(x, row2, x + bw2, row2 + bh), if (showRecipes) "조합법 닫기" else "조합법") { showRecipes = !showRecipes }
+        // 조합법 | 음악 켜기/끄기 | 새 게임
+        val mw = bh * 1.2f
+        val bwr = (w - mw - gap * 2) / 2f
+        button(c, RectF(x, row2, x + bwr, row2 + bh), if (showRecipes) "조합법 닫기" else "조합법") { showRecipes = !showRecipes }
+        musicButton(c, RectF(x + bwr + gap, row2, x + bwr + gap + mw, row2 + bh))
         val armed = System.currentTimeMillis() < newGameArmedUntil
-        button(c, RectF(x + bw2 + gap, row2, x + w, row2 + bh), if (armed) "정말 새 게임?" else "새 게임", color = if (armed) BTN_RED else BTN) {
+        button(c, RectF(x + bwr + mw + gap * 2, row2, x + w, row2 + bh), if (armed) "정말 새 게임?" else "새 게임", color = if (armed) BTN_RED else BTN) {
             if (System.currentTimeMillis() < newGameArmedUntil) {
                 newGameArmedUntil = 0L
                 goTitle()
@@ -901,7 +972,7 @@ class GameView(context: Context) : View(context) {
         y += drawWrapped(c, "보석 품질 레벨 ${game.chanceLevel}", x, y, w, dp(14f), Color.WHITE, bold = true) + dp(2f)
         y += drawWrapped(c, GemDB.chanceText(game.chanceLevel), x, y, w, dp(12f), TEXT_DIM) + dp(6f)
         if (game.passCount > 0) {
-            y += drawWrapped(c, "패스 ${game.passCount}회 · 모든 보석 공격력 +%.2f%%".format(game.passBonusPct), x, y, w, dp(12f), 0xFF7FE0D0.toInt()) + dp(6f)
+            y += drawWrapped(c, "패스 ${game.passCount}회 · 모든 보석 공격력 +%.0f%%".format(game.passBonusPct), x, y, w, dp(12f), 0xFF7FE0D0.toInt()) + dp(6f)
         }
         if (game.selected == null) {
             y = divider(c, x, y + dp(4f), w)
@@ -946,7 +1017,7 @@ class GameView(context: Context) : View(context) {
         }
 
         for (line in GemDB.describe(t.stats)) y += drawWrapped(c, line, x, y, w, dp(12f), TEXT_DIM)
-        if (t.kept) y += drawWrapped(c, "처치 ${t.kills} · 누적 피해 ${t.totalDamage.toInt()}", x, y, w, dp(12f), 0xFFA8E6B0.toInt())
+        if (t.kept) y += drawWrapped(c, "처치 ${t.kills} · 누적 피해 ${formatShort(t.totalDamage)}", x, y, w, dp(12f), 0xFFA8E6B0.toInt())
         val sp = t.special
         val uses = if (sp == null) GemDB.recipesUsing(GemKey(t.type, t.quality)) else GemDB.recipesUsing(sp)
         if (uses.isNotEmpty()) {
@@ -1005,7 +1076,7 @@ class GameView(context: Context) : View(context) {
         val lines = ArrayList<Line>()
         lines += Line("웨이브 ${game.wave}", dp(14f), Color.WHITE, true)
         lines += Line("생명 ${game.lives} · ${game.gold}G", dp(13f), 0xFFFFE9A8.toInt(), true)
-        if (game.passCount > 0) lines += Line("공격력 +%.2f%%".format(game.passBonusPct), dp(12f), 0xFF7FE0D0.toInt(), true)
+        if (game.passCount > 0) lines += Line("공격력 +%.0f%%".format(game.passBonusPct), dp(12f), 0xFF7FE0D0.toInt(), true)
         val hint = when {
             game.movingFrom != null -> "옮길 칸을 누르세요"
             game.state == GameState.BUILD_PLACE -> "보석 배치 ${game.roundGems.size}/${Game.GEMS_PER_ROUND}\n다음: ${game.waveInfo(game.wave).label}"
@@ -1199,8 +1270,56 @@ class GameView(context: Context) : View(context) {
 
     // =================================================================== 시작 화면 / 기록
 
+    /** 게임 화면이면 지금 상태를 저장 (전투 중이면 웨이브 시작 시점). 끝난 게임이면 저장본을 지움 */
+    private fun saveProgress() {
+        if (!saveEnabled || screen != Screen.GAME) return
+        lastSavedState = game.state
+        lastSavedWave = game.wave
+        val s = game.saveState()
+        if (s == null) clearSave() else if (s != savedGame) {
+            savedGame = s
+            saveStore.save(s)
+        }
+    }
+
+    private fun clearSave() {
+        savedGame = null
+        if (saveEnabled) saveStore.clear()
+    }
+
+    /** 단계가 바뀔 때마다 저장 (앱이 갑자기 종료돼도 최대한 최근 상태가 남도록) */
+    private fun autoSave() {
+        if (game.state != lastSavedState || game.wave != lastSavedWave) saveProgress()
+    }
+
+    /** 배경 음악 켜기/끄기 버튼 (MainActivity가 연결) */
+    var bgm: BgmPlayer? = null
+
+    private fun musicButton(c: Canvas, r: RectF) {
+        val b = bgm ?: return
+        button(c, r, if (b.enabled) "♪" else "♪✕", color = if (b.enabled) BTN_TEAL else BTN) { b.enabled = !b.enabled }
+    }
+
+    private fun continueGame() {
+        val s = savedGame ?: return
+        if (!game.loadState(s)) {
+            clearSave()
+            Toast.makeText(context, "저장된 게임을 불러오지 못했습니다", Toast.LENGTH_SHORT).show()
+            return
+        }
+        scrollY = 0f
+        showRecipes = false
+        confirmBreak = null
+        lastRecord = null
+        lastRank = null
+        screen = Screen.GAME
+        lastSavedState = game.state
+        lastSavedWave = game.wave
+    }
+
     private fun startGame() {
         game.newGame()
+        clearSave()
         scrollY = 0f
         showRecipes = false
         confirmBreak = null
@@ -1210,6 +1329,7 @@ class GameView(context: Context) : View(context) {
     }
 
     private fun goTitle() {
+        saveProgress()
         showRecipes = false
         confirmBreak = null
         screen = Screen.TITLE
@@ -1292,7 +1412,8 @@ class GameView(context: Context) : View(context) {
         val tw = titleText.measureText(TITLE)
         if (tw > colW) titleText.textSize *= colW / tw
         val titleH = titleText.textSize * 1.25f
-        val total = titleH + dp(22f) + dp(12f) + dp(30f) + dp(14f) + bh * 2 + dp(10f)
+        val saved = savedGame
+        val total = titleH + dp(22f) + dp(12f) + dp(30f) + dp(14f) + bh * 2 + dp(10f) + (if (saved != null) bh + dp(10f) else 0f)
         var y = cy - total / 2f
 
         val base = y + titleText.textSize
@@ -1317,7 +1438,7 @@ class GameView(context: Context) : View(context) {
         // 최고 기록
         val best = records.firstOrNull()
         val bestText = if (best == null) "첫 기록에 도전하세요"
-        else "최고 기록 · ${if (best.cleared) "클리어" else "웨이브 ${best.wave}"} · 보스 피해 ${Leaderboard.formatDamage(best.bossDamage)}"
+        else "최고 기록 · " + if (best.wave >= Game.MAX_WAVE) "${if (best.cleared) "클리어" else "최종 보스"} · 보스 피해 ${Leaderboard.formatDamage(best.bossDamage)}" else "웨이브 ${best.wave}"
         titlePaint.color = 0xE0231F42.toInt()
         tmpRect.set(colX, y, colX + colW, y + dp(30f))
         c.drawRoundRect(tmpRect, dp(15f), dp(15f), titlePaint)
@@ -1331,11 +1452,23 @@ class GameView(context: Context) : View(context) {
         text.typeface = Typeface.DEFAULT
         y += dp(30f) + dp(14f)
 
-        menuButton(c, RectF(colX, y, colX + colW, y + bh), "▶  게임 시작", 0xFF43B873.toInt(), 0xFF23774A.toInt()) { startGame() }
+        if (saved != null) {
+            val w = SAVED_WAVE.find(saved)?.groupValues?.get(1)
+            menuButton(c, RectF(colX, y, colX + colW, y + bh), "⟳  이어 하기" + (w?.let { " (웨이브 $it)" } ?: ""), 0xFFE0A030.toInt(), 0xFF9A6514.toInt()) { continueGame() }
+            y += bh + dp(10f)
+        }
+        menuButton(c, RectF(colX, y, colX + colW, y + bh), if (saved != null) "▶  새 게임" else "▶  게임 시작", 0xFF43B873.toInt(), 0xFF23774A.toInt()) { startGame() }
         y += bh + dp(10f)
         menuButton(c, RectF(colX, y, colX + colW, y + bh), "★  기록 TOP ${Leaderboard.SIZE}", 0xFF4A4F8C.toInt(), 0xFF2D3060.toInt()) {
             recordsScroll = 0f
             screen = Screen.RECORDS
+        }
+        // 오른쪽 위: 음악 켜기/끄기
+        bgm?.let { b ->
+            val bw = dp(104f)
+            val r = w - safeR - dp(12f)
+            val top = safeT + dp(12f)
+            button(c, RectF(r - bw, top, r, top + dp(34f)), if (b.enabled) "♪ 음악 켬" else "♪ 음악 끔", color = if (b.enabled) BTN_TEAL else BTN) { b.enabled = !b.enabled }
         }
     }
 
@@ -1441,10 +1574,10 @@ class GameView(context: Context) : View(context) {
         text.textAlign = Paint.Align.LEFT
         text.textSize = dp(11.5f)
         text.color = TEXT_DIM
-        c.drawText("순위 기준: 보스 피해 > 보스 시간 > 총 시간 > 남은 생명 > 남은 골드", l, y + dp(10f), text)
+        c.drawText("순위 기준: 최종 보스 피해 > 도달 웨이브 > 보스 시간 > 총 시간 > 남은 생명 > 남은 골드", l, y + dp(10f), text)
         y += dp(20f)
 
-        val heads = listOf("순위", "보스 피해", "보스 시간", "총 시간", "생명", "골드", "도달")
+        val heads = listOf("순위", "최종 보스 피해", "보스 시간", "총 시간", "생명", "골드", "도달")
         val weights = floatArrayOf(0.7f, 1.4f, 1.1f, 1.1f, 0.7f, 1f, 1.2f)
         val unit = (r - l) / weights.sum()
         fun rowCells(cells: List<String>, rowY: Float, h: Float, color: Int, bold: Boolean) {
@@ -1492,7 +1625,9 @@ class GameView(context: Context) : View(context) {
             }
             rowCells(
                 listOf(
-                    "${i + 1}", Leaderboard.formatDamage(rec.bossDamage), Leaderboard.formatTime(rec.bossTime),
+                    "${i + 1}",
+                    if (rec.wave >= Game.MAX_WAVE) Leaderboard.formatDamage(rec.bossDamage) else "-",
+                    if (rec.wave >= Game.MAX_WAVE) Leaderboard.formatTime(rec.bossTime) else "-",
                     Leaderboard.formatTime(rec.totalTime), "${rec.lives}", "${rec.gold}G",
                     if (rec.cleared) "클리어" else "웨이브 ${rec.wave}",
                 ),

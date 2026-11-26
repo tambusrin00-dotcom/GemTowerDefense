@@ -287,10 +287,10 @@ object GemDB {
     fun recipeText(r: Recipe) = "${r.result.label} = " + r.partLabels.joinToString(" + ")
 
     fun describe(s: GemStats): List<String> = buildList {
-        add("공격력 %.0f · 사거리 %.1f · 간격 %.2f초".format(s.damage, s.range, s.cooldown))
+        add("공격력 ${formatShort(s.damage)} · 사거리 %.1f · 간격 %.2f초".format(s.range, s.cooldown))
         if (s.splashRadius > 0) add("범위 피해 %.0f%% (반경 %.1f)".format(s.splashPct * 100, s.splashRadius))
         if (s.slowPct > 0) add("둔화 %.0f%% (%.1f초)".format(s.slowPct * 100, s.slowDur))
-        if (s.poisonDps > 0) add("독 초당 %.0f (%.0f초)".format(s.poisonDps, s.poisonDur))
+        if (s.poisonDps > 0) add("독 초당 ${formatShort(s.poisonDps)} (%.0f초)".format(s.poisonDur))
         if (s.targets > 1) add("동시 공격 ${s.targets}명")
         if (s.critChance > 0) add("치명타 %.0f%% (x%.1f)".format(s.critChance * 100, s.critMult))
         if (s.airMult > 1f) add("공중 유닛 피해 x%.1f".format(s.airMult))

@@ -9,14 +9,15 @@ import org.junit.Test
 import kotlin.random.Random
 
 class RecordsTest {
-    private fun rec(d: Double = 100.0, b: Double = 10.0, t: Double = 100.0, l: Int = 5, g: Int = 50) =
-        GameRecord(d, b, t, l, g, 10, false)
+    private fun rec(d: Double = 100.0, b: Double = 10.0, t: Double = 100.0, l: Int = 5, g: Int = 50, w: Int = 10) =
+        GameRecord(d, b, t, l, g, w, false)
 
     @Test
     fun rankingAppliesEachCriterionInOrder() {
         val base = rec()
         // 앞 기준이 뒤 기준보다 우선: 뒤 기준은 일부러 불리하게 둠
         assertTrue(Leaderboard.ranking.compare(rec(d = 101.0, b = 99.0, t = 999.0, l = 0, g = 0), base) < 0)
+        assertTrue(Leaderboard.ranking.compare(rec(w = 11, b = 99.0, t = 999.0, l = 0, g = 0), base) < 0)
         assertTrue(Leaderboard.ranking.compare(rec(b = 9.0, t = 999.0, l = 0, g = 0), base) < 0)
         assertTrue(Leaderboard.ranking.compare(rec(t = 99.0, l = 0, g = 0), base) < 0)
         assertTrue(Leaderboard.ranking.compare(rec(l = 6, g = 0), base) < 0)
@@ -64,13 +65,17 @@ class RecordsTest {
     @Test
     fun shareTextHasScoreAndDownloadLink() {
         val url = "https://play.google.com/store/apps/details?id=com.tambusrin.gemtower"
-        val s = Leaderboard.shareText(GameRecord(15000.0, 65.5, 3661.0, 7, 120, 42, false), url)
+        // 최종 보스까지 못 간 판: 보스 피해·시간은 빼고 도달 웨이브와 총 시간만
+        val s = Leaderboard.shareText(GameRecord(0.0, 0.0, 3661.0, 7, 120, 42, false), url)
         assertTrue(s.contains("웨이브: 42"))
-        assertTrue(s.contains("1.50만"))
-        assertTrue(s.contains("1:05.5"))
+        assertFalse(s.contains("보스 피해"))
         assertTrue(s.contains("1:01:01"))
         assertTrue(s.contains("120G"))
         assertTrue(s.endsWith(url))
+        // 최종 보스 판
+        val f = Leaderboard.shareText(GameRecord(15000.0, 65.5, 3661.0, 7, 120, Game.MAX_WAVE, false), url)
+        assertTrue(f.contains("최종 보스 피해: 1.50만"))
+        assertTrue(f.contains("1:05.5"))
         assertTrue(Leaderboard.shareText(GameRecord(1.0, 1.0, 1.0, 1, 1, 201, true), url).contains("클리어"))
     }
 
@@ -114,5 +119,26 @@ class RecordsTest {
         assertNotNull(result)
         assertTrue(result!!.cleared)
         assertEquals(5.0, result!!.bossDamage, 0.0)
+    }
+
+    @Test
+    fun earlierBossWavesDoNotCount() {
+        val g = Game(Random(3))
+        var result: GameRecord? = null
+        g.onFinished = { result = it }
+        g.debugSetup(wave = 10, gold = 0, chanceLevel = 0, lives = 1)
+        val path = g.groundPath.toSet()
+        val beside = g.groundPath.drop(5).flatMap {
+            listOf(Cell(it.x + 1, it.y), Cell(it.x - 1, it.y), Cell(it.x, it.y + 1), Cell(it.x, it.y - 1))
+        }.first { g.inBounds(it) && it !in path && g.canBuild(it) }
+        g.debugKeptGem(beside, GemType.RUBY, GemQuality.CHIPPED)
+        g.debugStartWave()   // 10웨이브 보스: 맞기는 하지만 최종 보스가 아니라 기록에 안 들어감
+        var time = 0f
+        while (g.state == GameState.WAVE && time < 300f) { g.update(0.05f); time += 0.05f }
+        assertNotNull(result)
+        assertEquals(10, result!!.wave)
+        assertEquals(0.0, result!!.bossDamage, 0.0)
+        assertEquals(0.0, result!!.bossTime, 0.0)
+        assertTrue(result!!.totalTime > 0.0)
     }
 }

@@ -143,6 +143,26 @@ class Beam(val x1: Float, val y1: Float, val x2: Float, val y2: Float, val color
     companion object { const val DURATION = 0.18f }
 }
 
+/** 적 위로 떠오르는 피해 숫자 */
+class DamageText(val x: Float, val y: Float, val amount: Float, val crit: Boolean) {
+    var age = 0f; internal set
+    companion object { const val DURATION = 0.8f }
+}
+
+/** 피해 숫자를 짧게: 999 → "999", 12_345 → "12.3k", 4.5e6 → "4.5m" (k·m·b·t, 그 이상은 지수 표기) */
+fun formatShort(v: Float): String = formatShort(v.toDouble())
+
+fun formatShort(v: Double): String {
+    if (v < 1000.0) return v.toLong().toString()
+    val units = arrayOf("k", "m", "b", "t")
+    var x = v
+    for (u in units) {
+        x /= 1000.0
+        if (x < 1000.0) return (if (x < 100.0) String.format(java.util.Locale.US, "%.1f", x).removeSuffix(".0") else x.toLong().toString()) + u
+    }
+    return String.format(java.util.Locale.US, "%.2e", v).replace("e+", "e")
+}
+
 class Projectile(val src: Tower, val target: Enemy, var x: Float, var y: Float, val damage: Float, val crit: Boolean) {
     var aimX = target.x; internal set
     var aimY = target.y; internal set
@@ -163,12 +183,14 @@ class Game(private val rng: Random = Random.Default) {
         const val ENDLESS_FROM = 30        // 이 웨이브 이후로 난이도가 계속 상승
         const val ENDLESS_HP_GROWTH = 1.08f   // 30웨이브 이후 웨이브마다 체력 +8%
         const val DOUBLE_EVERY = 5             // 30웨이브 이후 이 주기마다 체력 2배
-        const val PASS_BONUS_PCT = 0.01f       // 패스 1회당 공격력 상승(%)
+        const val PASS_BONUS_PCT = 1f          // 패스 1회당 공격력 상승(%)
         const val START_LIVES = 20
         const val ROCK_REMOVE_COST = 10
         const val MOVE_COST = 15
         const val PROJECTILE_SPEED = 14f
         private const val MAX_STEP = 0.02f
+        private const val MAX_DAMAGE_TEXTS = 60
+        private const val SAVE_VERSION = 1
 
         /** 적이 순서대로 거쳐가는 지점 (출발 → 체크포인트 → 도착) */
         val WAYPOINTS = listOf(
@@ -183,6 +205,7 @@ class Game(private val rng: Random = Random.Default) {
     val enemies = ArrayList<Enemy>()
     val projectiles = ArrayList<Projectile>()
     val beams = ArrayList<Beam>()
+    val damageTexts = ArrayList<DamageText>()
     val roundGems = ArrayList<Tower>()
 
     var groundPath: List<Cell> = emptyList(); private set
@@ -205,6 +228,7 @@ class Game(private val rng: Random = Random.Default) {
     var time = 0f; private set
 
     // 기록용 (전투 시간은 배속과 무관한 게임 시간)
+    // 보스 피해·보스 시간은 최종 보스(MAX_WAVE)에게 준 것만 셈
     private var bossDamage = 0.0
     private var bossTime = 0.0
     private var battleTime = 0.0
@@ -214,10 +238,13 @@ class Game(private val rng: Random = Random.Default) {
     private var toSpawn = 0
     private var spawnTimer = 0f
 
+    /** 최종 보스 웨이브인지 (기록의 보스 피해·보스 시간은 이 웨이브만 셈) */
+    private val isFinalBossWave get() = wave >= MAX_WAVE
+
     val remainingEnemies get() = enemies.size + toSpawn
     val isBuildState get() = state == GameState.BUILD_PLACE || state == GameState.BUILD_CHOOSE
 
-    /** 보석 배치를 패스한 횟수. 패스 1회당 모든 보석 공격력 +0.01% */
+    /** 보석 배치를 패스한 횟수. 패스 1회당 모든 보석 공격력 +1% */
     var passCount = 0; private set
     val passBonusPct get() = passCount * PASS_BONUS_PCT
     private val passMultiplier get() = 1f + passBonusPct / 100f
@@ -242,6 +269,7 @@ class Game(private val rng: Random = Random.Default) {
         enemies.clear()
         projectiles.clear()
         beams.clear()
+        damageTexts.clear()
         roundGems.clear()
         wave = 1
         lives = START_LIVES
@@ -255,6 +283,7 @@ class Game(private val rng: Random = Random.Default) {
         selected = null
         movingFrom = null
         state = GameState.BUILD_PLACE
+        waveStartSave = null
         recalcPath()
         showMessage("빈 칸을 눌러 보석 5개를 배치하세요")
     }
@@ -597,7 +626,7 @@ class Game(private val rng: Random = Random.Default) {
         refreshHiddenGems()
         movingFrom = null
         startWave()
-        showMessage("패스! 모든 보석 공격력 +%.2f%%".format(passBonusPct))
+        showMessage("패스! 모든 보석 공격력 +%.0f%%".format(passBonusPct))
         return true
     }
 
@@ -621,6 +650,109 @@ class Game(private val rng: Random = Random.Default) {
 
     internal fun addGold(amount: Int) {
         gold += amount
+    }
+
+    // ------------------------------------------------------------------ 이어 하기 (저장/불러오기)
+
+    /** 웨이브가 시작될 때의 상태. 전투 중에 앱이 꺼지면 이 시점부터 다시 시작함 */
+    private var waveStartSave: String? = null
+
+    /**
+     * 이어 하기용 저장 문자열. 건설 단계는 지금 상태 그대로, 전투 중이면 그 웨이브가 시작될 때의 상태.
+     * 게임이 끝났으면 null (이어 할 것이 없음).
+     */
+    fun saveState(): String? = when (state) {
+        GameState.GAME_OVER, GameState.VICTORY -> null
+        GameState.WAVE -> waveStartSave
+        else -> encodeState()
+    }
+
+    private fun encodeState(): String = buildString {
+        fun kv(k: String, v: Any) { append(k).append('=').append(v).append('\n') }
+        kv("v", SAVE_VERSION)
+        kv("state", state.name)
+        kv("wave", wave)
+        kv("lives", lives)
+        kv("gold", gold)
+        kv("chance", chanceLevel)
+        kv("pass", passCount)
+        kv("bossDamage", bossDamage)
+        kv("bossTime", bossTime)
+        kv("battleTime", battleTime)
+        kv("cells", buildString { for (y in 0 until H) for (x in 0 until W) append(cells[x][y].ordinal) })
+        for (x in 0 until W) for (y in 0 until H) {
+            val t = towers[x][y] ?: continue
+            val round = roundGems.indexOf(t)
+            kv("tower", listOf(x, y, t.type.name, t.quality.name, t.special?.name ?: "-", t.specialLevel,
+                if (t.kept) 1 else 0, t.kills, t.totalDamage, if (t.moved) 1 else 0, round).joinToString(","))
+        }
+    }
+
+    /** saveState()로 만든 문자열을 불러옴. 형식이 맞지 않으면 아무것도 바꾸지 않고 false */
+    fun loadState(s: String): Boolean {
+        val g = Game()
+        if (!runCatching { g.decodeInto(s) }.getOrDefault(false)) return false
+        decodeInto(s)
+        return true
+    }
+
+    private fun decodeInto(s: String): Boolean {
+        val map = HashMap<String, String>()
+        val towerLines = ArrayList<String>()
+        for (line in s.lineSequence()) {
+            val i = line.indexOf('=')
+            if (i <= 0) continue
+            val k = line.substring(0, i)
+            val v = line.substring(i + 1)
+            if (k == "tower") towerLines.add(v) else map[k] = v
+        }
+        if (map["v"]?.toIntOrNull() != SAVE_VERSION) return false
+        val st = GameState.valueOf(map.getValue("state"))
+        if (st == GameState.GAME_OVER || st == GameState.VICTORY) return false
+        val cellStr = map.getValue("cells")
+        if (cellStr.length != W * H) return false
+
+        newGame()
+        wave = map.getValue("wave").toInt()
+        lives = map.getValue("lives").toInt()
+        gold = map.getValue("gold").toInt()
+        chanceLevel = map.getValue("chance").toInt()
+        passCount = map.getValue("pass").toInt()
+        bossDamage = map.getValue("bossDamage").toDouble()
+        bossTime = map.getValue("bossTime").toDouble()
+        battleTime = map.getValue("battleTime").toDouble()
+        for (y in 0 until H) for (x in 0 until W) cells[x][y] = CellType.entries[cellStr[y * W + x] - '0']
+        val round = ArrayList<Pair<Int, Tower>>()
+        for (line in towerLines) {
+            val p = line.split(',')
+            val x = p[0].toInt()
+            val y = p[1].toInt()
+            val t = Tower(Cell(x, y), GemType.valueOf(p[2]), GemQuality.valueOf(p[3]))
+            t.damageMul = passMultiplier
+            if (p[4] != "-") t.setGem(t.type, t.quality, SpecialKind.valueOf(p[4]))
+            t.specialLevel = p[5].toInt()
+            t.refresh()
+            t.kept = p[6] == "1"
+            t.kills = p[7].toInt()
+            t.totalDamage = p[8].toFloat()
+            t.moved = p[9] == "1"
+            val ri = p[10].toInt()
+            if (ri >= 0) round.add(ri to t)
+            cells[x][y] = CellType.GEM
+            towers[x][y] = t
+        }
+        round.sortBy { it.first }
+        roundGems.addAll(round.map { it.second })
+        recalcPath()
+        refreshHiddenGems()
+        if (st == GameState.WAVE) {
+            startWave()
+            showMessage("이어 하기 · 웨이브 $wave 처음부터 다시 시작")
+        } else {
+            state = st
+            showMessage(if (st == GameState.BUILD_CHOOSE) "이어 하기 · 남길 보석 하나를 눌러 선택하세요" else "이어 하기 · 보석 ${GEMS_PER_ROUND - roundGems.size}개를 더 배치하세요")
+        }
+        return true
     }
 
     // ------------------------------------------------------------------ 스크린샷/테스트용 (debug 소스셋에서만 호출)
@@ -711,6 +843,7 @@ class Game(private val rng: Random = Random.Default) {
         toSpawn = currentWave.count
         spawnTimer = 0.3f
         state = GameState.WAVE
+        waveStartSave = encodeState()
         showMessage("웨이브 $wave - ${currentWave.label}")
     }
 
@@ -774,7 +907,7 @@ class Game(private val rng: Random = Random.Default) {
         refreshHiddenGems()
         if (state == GameState.WAVE) {
             battleTime += dt
-            if (currentWave.boss) bossTime += dt
+            if (isFinalBossWave) bossTime += dt
         }
 
         if (state == GameState.WAVE && toSpawn > 0) {
@@ -821,7 +954,7 @@ class Game(private val rng: Random = Random.Default) {
             if (d <= mv) {
                 p.x = p.aimX; p.y = p.aimY
                 p.done = true
-                applyHit(p.src, p.target, p.aimX, p.aimY, p.damage)
+                applyHit(p.src, p.target, p.aimX, p.aimY, p.damage, p.crit)
             } else {
                 p.x += dx / d * mv
                 p.y += dy / d * mv
@@ -829,10 +962,12 @@ class Game(private val rng: Random = Random.Default) {
         }
 
         for (b in beams) b.ttl -= dt
+        for (t in damageTexts) t.age += dt
 
         enemies.removeAll { it.dead }
         projectiles.removeAll { it.done }
         beams.removeAll { it.ttl <= 0f }
+        damageTexts.removeAll { it.age >= DamageText.DURATION }
 
         if (state == GameState.WAVE && toSpawn == 0 && enemies.isEmpty()) endWave()
     }
@@ -861,8 +996,11 @@ class Game(private val rng: Random = Random.Default) {
         t.cooldown = s.cooldown
     }
 
-    private fun applyHit(src: Tower, target: Enemy, x: Float, y: Float, dmg: Float) {
-        if (!target.dead) hit(src, target, dmg)
+    private fun applyHit(src: Tower, target: Enemy, x: Float, y: Float, dmg: Float, crit: Boolean = false) {
+        if (!target.dead) {
+            val dealt = hit(src, target, dmg)
+            if (dealt > 0f) addDamageText(target.x, target.y, dealt, crit)
+        }
         val s = src.stats
         if (s.splashRadius > 0f) {
             val r2 = s.splashRadius * s.splashRadius
@@ -907,7 +1045,8 @@ class Game(private val rng: Random = Random.Default) {
         }
     }
 
-    private fun hit(src: Tower, e: Enemy, dmg: Float) {
+    /** 맞힌 피해량(공중 배율 포함)을 돌려줌 */
+    private fun hit(src: Tower, e: Enemy, dmg: Float): Float {
         val s = src.stats
         if (s.slowPct > 0f) e.applySlow(s.slowPct, s.slowDur)
         if (s.poisonDps > 0f) e.applyPoison(s.poisonDps, s.poisonDur, src)
@@ -915,21 +1054,33 @@ class Game(private val rng: Random = Random.Default) {
             val dur = if (e.boss) s.stunDur * 0.5f else s.stunDur
             e.stunTimer = maxOf(e.stunTimer, dur)
         }
-        damage(e, dmg * (if (e.flying) s.airMult else 1f), src)
+        val dealt = dmg * (if (e.flying) s.airMult else 1f)
+        damage(e, dealt, src)
         if (s.executePct > 0f && !e.dead && !e.boss && e.hp <= e.maxHp * s.executePct) damage(e, e.hp + 1f, src)
+        return dealt
     }
 
     private fun damage(e: Enemy, dmg: Float, src: Tower?) {
         if (e.dead || dmg <= 0f) return
         val applied = min(e.hp, dmg)
         e.hp -= dmg
-        if (e.boss) bossDamage += applied
+        if (e.boss && isFinalBossWave) bossDamage += applied
         if (src != null) src.totalDamage += applied
         if (e.hp <= 0f) {
             e.dead = true
             if (src != null) src.kills++
             gold += e.bounty + (src?.stats?.bountyBonus ?: 0)
         }
+    }
+
+    private fun addDamageText(x: Float, y: Float, amount: Float, crit: Boolean) {
+        // 너무 많이 쌓이면 오래된 것부터 버림 (화면 가림·성능 방지). 치명타는 우선 유지
+        if (damageTexts.size >= MAX_DAMAGE_TEXTS) {
+            val i = damageTexts.indexOfFirst { !it.crit }
+            if (i >= 0) damageTexts.removeAt(i) else if (!crit) return else damageTexts.removeAt(0)
+        }
+        // 같은 적 위에서 겹치지 않게 살짝 흩뿌림 (게임 rng를 쓰면 시드 고정 테스트의 결과가 바뀌므로 별도 난수)
+        damageTexts.add(DamageText(x + (Random.Default.nextFloat() - 0.5f) * 0.4f, y - 0.3f, amount, crit))
     }
 
     private fun showMessage(m: String) {

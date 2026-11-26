@@ -20,8 +20,8 @@ class PassRoundTest {
         assertTrue(g.passRound())
         assertEquals(GameState.WAVE, g.state)
         assertEquals(1, g.passCount)
-        assertEquals(base.damage * 1.0001f, t.stats.damage, 0.001f)
-        assertEquals(base.poisonDps * 1.0001f, t.stats.poisonDps, 0.001f)
+        assertEquals(base.damage * 1.01f, t.stats.damage, 0.001f)
+        assertEquals(base.poisonDps * 1.01f, t.stats.poisonDps, 0.001f)
     }
 
     @Test
@@ -41,7 +41,7 @@ class PassRoundTest {
         val (g, _) = gameWithGem()
         g.passRound()
         val later = g.placeGem(Cell(17, 18), GemType.RUBY, GemQuality.FLAWED, hidden = false)
-        assertEquals(GemQuality.FLAWED.baseDamage * 1.0001f, later.stats.damage, 0.001f)
+        assertEquals(GemQuality.FLAWED.baseDamage * 1.01f, later.stats.damage, 0.001f)
         g.newGame()
         assertEquals(0, g.passCount)
     }

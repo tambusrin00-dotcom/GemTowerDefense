@@ -6,8 +6,8 @@ import kotlin.math.round
 
 /** 한 판의 결과. 화면에 보이는 단위로 반올림해 저장하므로, 보이는 값이 같으면 다음 기준으로 넘어간다. */
 data class GameRecord(
-    val bossDamage: Double,   // 보스에게 준 총 피해 (정수)
-    val bossTime: Double,     // 보스 웨이브 전투 시간 합 (초, 0.1초 단위)
+    val bossDamage: Double,   // 최종 보스에게 준 피해 (정수). 최종 보스까지 못 가면 0
+    val bossTime: Double,     // 최종 보스 전투 시간 (초, 0.1초 단위)
     val totalTime: Double,    // 모든 웨이브 전투 시간 합 (초, 0.1초 단위)
     val lives: Int,
     val gold: Int,
@@ -25,8 +25,9 @@ data class GameRecord(
 object Leaderboard {
     const val SIZE = 10
 
-    /** 보스 피해↑ > 보스 시간↓ > 총 시간↓ > 생명↑ > 골드↑ */
+    /** 최종 보스 피해↑ > 도달 웨이브↑ > 보스 시간↓ > 총 시간↓ > 생명↑ > 골드↑ */
     val ranking: Comparator<GameRecord> = compareByDescending<GameRecord> { it.bossDamage }
+        .thenByDescending { it.wave }
         .thenBy { it.bossTime }
         .thenBy { it.totalTime }
         .thenByDescending { it.lives }
@@ -64,8 +65,12 @@ object Leaderboard {
     fun shareText(r: GameRecord, downloadUrl: String): String = buildString {
         appendLine("💎 보석 타워 디펜스 내 1위 기록!")
         appendLine(if (r.cleared) "🏆 최종 보스 처치, 게임 클리어" else "🌊 도달 웨이브: ${r.wave}")
-        appendLine("⚔️ 보스 피해: ${formatDamage(r.bossDamage)}")
-        appendLine("⏱️ 보스 시간: ${formatTime(r.bossTime)} · 총 시간: ${formatTime(r.totalTime)}")
+        if (r.wave >= Game.MAX_WAVE) {
+            appendLine("⚔️ 최종 보스 피해: ${formatDamage(r.bossDamage)}")
+            appendLine("⏱️ 보스 시간: ${formatTime(r.bossTime)} · 총 시간: ${formatTime(r.totalTime)}")
+        } else {
+            appendLine("⏱️ 총 시간: ${formatTime(r.totalTime)}")
+        }
         appendLine("❤️ 남은 생명: ${r.lives} · 💰 남은 골드: ${r.gold}G")
         appendLine()
         appendLine("이 기록을 깰 수 있을까요? 지금 다운로드 👇")
